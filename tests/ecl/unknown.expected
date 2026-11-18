@@ -1,0 +1,6 @@
+unknown == unknown: True
+unknown == null: False
+unknown == none: False
+falsy
+unknown + 1 -> TypeError
+unknown < 1 -> TypeError

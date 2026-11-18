@@ -1,0 +1,720 @@
+╔════════════════════════════════════════════╗
+║                                            ║
+║                 ECL 0.1.0                  ║
+║            Easy Control Language           ║
+║              简单, 兼容, 极致               ║
+║                                            ║
+╚════════════════════════════════════════════╝
+
+* 变更记录
+  - 2026-11-17: 新增 @@ 外部语言执行语法；
+                明确 import 扁平命名约定（模块名_成员名，无点号）。
+
+================================================================
+一、 变量定义
+================================================================
+- a <- 7                 (自动推断类型)
+- int x <- 9             (显式声明类型)
+- int x <- double b <- 9 (链式声明, 自动类型转换)
+- a <-> b                (交换变量 a 和 b)
+- define any x           (仅声明，赋值为 null)
+- ref a <- b             (引用传递, 底层共享内存)
+- const MAX <- 999       (常量声明, 修改会抛出 ConstChangingError)
+
+================================================================
+二、 基础类型
+================================================================
+* 标量型
+  - int:     整数 (任意精度)
+  - i64:     64位整数 (固定宽度, 溢出回绕)
+  - i32:     32位整数 (Win32 结构体用)
+  - float:   64位双精度浮点数 (默认)
+  - double:  128位高精度浮点数
+  - bool:    True/False (或 true/false)
+
+* 复合型
+  - list:    动态数组, 支持 list[int] 或 list[5] int 固定长度
+  - dict:    有序哈希字典
+  - tuple:   不可变序列
+  - code:    代码字符串, 可以用 run() 运行；
+             也可作为 @@X(code) 的输入，交给外部语言解析器
+  - struct:  结构体 (仅 dll_import 签名使用)
+
+* 特殊类型
+  - str:     字符串, 长度任意
+  - cstr:    C 风格字符串 (char*, dll_import 用)
+  - ptr:     裸指针 (void*, dll_import 用)
+  - none:    显式空值 (唯一可作为右值/返回值的空值)
+  - null:    空指针 (释放内存或未初始化后的状态)
+  - unknown: 未定义就使用变量时得到的特殊值
+  - any:     任意类型
+
+* 修饰符
+  - public/private: 属性可见性 / DLL 导出可见性
+  - const:          常量修饰
+
+* 精度说明
+  - float:  64 位双精度 (IEEE 754 binary64)
+  - double: 128 位高精度 (IEEE 754 binary128)
+
+================================================================
+三、 字面量
+================================================================
+# 数字
+a <- 42             # 十进制
+b <- -7             # 负数
+c <- 0b1010         # 二进制 (10)
+d <- 0o755          # 八进制 (493)
+e <- 0xFF           # 十六进制 (255)
+f <- 1_000_000      # 下划线分隔 (1000000)
+
+# 浮点数
+pi <- 3.14159       # 默认 float (64位)
+pi_d <- 3.14159d    # 后缀 d 代表 double (128位)
+large <- 1.5e10     # 科学计数法 (float)
+
+# 字符串
+s1 <- "Hello"
+s2 <- "你好, $name"  # 插值字符串
+s3 <- "Result: ${1 + 2}" # 表达式插值
+
+# 代码对象
+c <- `int x <- 42`  # 反引号定义代码块
+c.run()             # 运行代码块
+
+# list / dict / tuple
+l <- [1, 2, 3]
+d <- {"a": 1, "b": 2}
+t <- (1, 2, 3)
+
+================================================================
+四、 控制流
+================================================================
+1. 条件分支
+if bool:
+    # 代码
+elif bool:
+    # 代码
+else:
+    # 代码
+end
+
+2. 循环结构
+for i in Iterable:  # 遍历容器
+    # 代码
+end
+
+for i in 1..10:     # 遍历 1 到 9 (不包含 10)
+    # 代码
+end
+
+for i in 1..10+2:   # 遍历 1 到 9, 步长 2
+    # 代码
+end
+
+for i in 1..=10:    # 遍历 1 到 10 (包含 10)
+    # 代码
+end
+
+for 10:             # 循环 10 次
+    # 代码
+end
+
+while bool:
+    # 代码
+end
+
+3. 跳转语句
+- continue: 跳过当前循环剩余部分，进入下一轮。
+- break:    跳出最近一层循环（match 内的 break 见第十一节）。
+- goto + label: 跳转到指定标签 (不能跨越函数)。
+
+================================================================
+五、 函数
+================================================================
+1. 多行函数
+def function(int a, str *args, int key=1, **kw) -> int:
+    return a + key
+end
+
+2. 单行函数 (自动 return 表达式)
+f(x) -> int <- x + 1
+
+3. return 规则
+- return 无值      → 返回 none
+- return none      → 返回 none
+- return null      → 错误 (null 不能作为返回值)
+- return unknown   → 错误 (unknown 不能作为返回值)
+- 函数末尾无 return → 返回 none
+
+4. 作用域访问
+x <- 9
+def f(x):
+    print(global.x) # 访问全局变量
+    global.x <- 10  # 修改全局变量
+    print(x)        # 访问局部参数
+    x <- 10         # 修改局部变量
+
+    def inner():
+        last.x <- 20 # 访问上层(闭包)变量
+    end
+    inner()
+end
+
+5. 函数重载
+同名函数，如果参数类型不同，不会覆盖，而是重载。
+
+================================================================
+六、 面向对象 (类)
+================================================================
+class a(b, c):
+    # 继承 b 和 c
+
+    def __init__(int x, int y) -> none:
+        self.x <- x
+        self.y <- y
+    end
+
+    def method() -> none:
+        # self 隐式可用，不需要写在参数列表
+        self.value <- 1
+    end
+end
+
+* self 是隐式的
+  - 方法定义里不写 self，self 不占参数位置。
+  - 方法体里直接使用 self，指向当前实例。
+  - 方法调用: obj.method()，不传 self。
+  - 构造: Point(3, 4)，不传 self。
+
+* 继承调用
+  - using b / using c
+  - 在方法体里通过基类名访问基类方法：b.method()
+
+* 属性
+  - self.attr <- value 设置实例属性。
+  - self.attr 读取实例属性。
+  - 类体里直接声明的变量会成为所有实例的初始属性。
+
+================================================================
+七、 魔法方法 (Magic Methods)
+================================================================
+* 算术运算
+  a + b    →  a.__add__(b)
+  a - b    →  a.__sub__(b)
+  a * b    →  a.__mul__(b)
+  a / b    →  a.__div__(b)
+  a // b   →  a.__floordiv__(b)
+  a % b    →  a.__mod__(b)
+  a ** b   →  a.__pow__(b)
+  -a       →  a.__neg__()
+
+* 比较运算
+  a == b   →  a.__eq__(b)
+  a != b   →  a.__ne__(b)
+  a < b    →  a.__lt__(b)
+  a <= b   →  a.__le__(b)
+  a > b    →  a.__gt__(b)
+  a >= b   →  a.__ge__(b)
+
+* 位运算与其他
+  a | b    →  a.__bor__(b)
+  a & b    →  a.__band__(b)
+  a ^ b    →  a.__xor__(b)
+  a << b   →  a.__lshift__(b)
+  a >> b   →  a.__rshift__(b)
+  ~a       →  a.__invert__()
+
+* 容器与类型
+  a[b]     →  a.__getitem__(b)
+  a(b)     →  a.__call__(b)
+  str(a)   →  a.__str__()
+
+* 上下文管理
+  with a:  →  a.__enter__() / a.__leave__(exc_type, exc_value)
+
+================================================================
+八、 异常处理
+================================================================
+try:
+    # 可能会报错的代码
+    int x <- 10 / 0
+except ZeroDivisionError:
+    # 捕获到特定错误时执行
+    print("除以零错误！")
+else:
+    # 没有发生错误时执行
+    print("计算成功！")
+finally:
+    # 无论是否报错都执行
+    print("清理工作完成。")
+end
+
+================================================================
+九、 导入模块 (Import)
+================================================================
+# 方式一：直接导入 (模块成员以「模块名_成员名」扁平形式暴露)
+import math
+math_square(5)          # math 模块里的 square 函数，扁平名为 math_square
+
+# 方式二：起别名 (别名同样参与扁平拼接)
+import math as m
+m_square(5)             # m 模块里的 square 函数，扁平名为 m_square
+
+# 方式三：从模块导入指定函数
+from math import square
+square(5)               # 直接使用，不加前缀
+
+* 命名规则
+  - 模块内成员以「模块名_成员名」的扁平形式暴露到当前命名空间。
+  - 不使用点号访问（没有 math.square 这种写法）。
+  - 模块内的类同样遵循此规则：lib/py.ecl 里的 class py，
+    导入后以 py_py 的名字可见（模块名 py + 类名 py）。
+  - 命名约定「模块名_成员名」是文档建议，编译器只检查
+    目标名字是否存在。
+
+================================================================
+十、 @@ 外部语言执行
+================================================================
+* 语法
+  @@<扁平类名>(<代码字符串>)
+
+* 脱糖规则
+  @@py_py(code)  →  py_py().__exec__(code)
+
+* 语义
+  - @@ 后面跟一个已加载的扁平类名（如 py_py）。
+  - 该名称按「模块名_类名」约定，语义上等价于 Python 的 py.py。
+  - 该类必须实现 __exec__(str code) 方法。
+  - 编译器只做语法糖转换，不解析外部语言语法。
+  - 脱糖后是普通的类实例化 + 方法调用，走现有 IR。
+
+* 前置条件
+  - 必须先 import 对应模块（如 import py 加载 lib/py.ecl）。
+  - 目标类必须实现 __exec__，否则检查器报错。
+  - 没有 import 就使用 @@X，检查器报错。
+
+* 返回值
+  - __exec__ 返回一个上下文对象（如 PyContext）。
+  - 该对象提供 .run(...) 方法，用于传入参数并执行外部代码。
+
+* 示例
+  import py
+  code <- """
+  def add(a, b):
+      return a + b
+  """
+  ctx <- @@py_py(code)      # 脱糖为 py_py().__exec__(code)
+  result <- ctx.run(3, 5)   # 调用上下文对象的 run 方法
+
+* 扩展性
+  - @@lua_lua(code)、@@js_js(code) 遵循同一规则。
+  - 任何模块只要提供实现了 __exec__ 的类，即可被 @@ 调用。
+  - 无需 C ABI、DLL 或编译器特殊处理。
+
+* 与 dll_import 的区别
+  - dll_import 调用原生 DLL，走 C ABI。
+  - @@ 调用 ECL 写的解释器/解析器，纯 ECL 对象和方法。
+  - 两者可以共存。
+
+================================================================
+十一、 match-case
+================================================================
+match expr:
+    case pattern1:
+        # 代码
+    case pattern2:
+        # 代码
+        break
+    case _:
+        # 默认分支
+end
+
+* 前置声明
+  - 默认不 fallthrough。
+  - 在程序任意位置声明 define const FALLTHROUGH 后，
+    整个程序的所有 match 默认 fallthrough。
+
+* 匹配规则 (默认模式)
+  - expr 只求值一次，所有 case 比较同一个值。
+  - expr 必须是变量或简单左值，case 体内通过该变量引用匹配值。
+  - 从上到下，第一个匹配的 case 执行，执行完退出 match。
+  - 没有匹配且没有 _ 时，什么都不做，不抛异常。
+  - _ 只能出现一次，建议放最后；_ 之后的 case 不可达，检查器警告。
+
+* 匹配规则 (fallthrough 模式)
+  - 声明 define const FALLTHROUGH 后生效。
+  - 找到第一个匹配的 case，从那里开始执行。
+  - 之后每个 case 的 body 都执行，不管模式是否匹配。
+  - 直到 match 末尾或遇到 break。
+  - 没有匹配且没有 _ 时，什么都不执行。
+
+* 跳转语句
+  - break 在 match 内表示跳出当前 match，始终合法。
+  - continue 在 match 内是错误（match 不是循环）。
+
+* 模式
+  - 字面量: case 1: / case "abc": / case True: / case none: / case null:
+  - 类型: case int: / case str: / case Point: / case any:
+  - 多值: case 1, 2, 3: （只允许字面量，不允许混合类型模式）
+  - 通配: case _:
+  - 守卫: case int if cond:
+
+* 约束
+  - 不支持变量绑定，case int n: 是语法错误。
+  - case 后只能跟字面量/类型/`_`/多值，不能跟任意表达式。
+  - 多值模式里不能混类型模式和字面量模式。
+  - FALLTHROUGH 不能作为值使用（不能赋值/打印/参与运算）。
+  - 类解构、列表/字典解构不支持。
+
+================================================================
+十二、 with (上下文管理)
+================================================================
+with expr:
+    # 代码
+end
+
+with expr as name:
+    # 代码
+end
+
+with a as x, b as y:
+    # 等价于嵌套 with
+end
+
+* 语义
+  - 进入 with 块时调用 expr.__enter__()。
+  - 如果有 as name，__enter__() 的返回值绑定到 name。
+  - 离开 with 块时调用 obj.__leave__(exc_type, exc_value)。
+  - 正常结束时 exc_type / exc_value 为 none。
+  - 异常时 exc_type 是异常类型，exc_value 是异常值。
+  - __leave__ 返回 true 表示吞掉异常，false 表示继续传播。
+  - 没有 __enter__ 或 __leave__ 时抛 TypeError。
+  - 多个资源等价于嵌套 with，先进入后离开（LIFO）。
+
+* 示例
+with File("a.txt") as f:
+    print(f.read())
+end
+
+================================================================
+十三、 using (成员引入)
+================================================================
+using obj
+    # 从这一行开始，到当前块结束，obj 的成员可以被直接访问
+
+* 语义
+  - using obj 后，obj 的成员（属性/方法）可以直接用名字访问，
+    不需要 obj. 前缀。
+  - 不需要 end，作用范围从 using 行开始，到当前块结束
+    （最近的 end / else / elif / except / finally / case）。
+  - 多个 using 叠加: 后 using 的成员覆盖前 using 的同名成员。
+  - 查找顺序: 当前作用域变量 -> using 引入的成员 -> 全局变量。
+  - 写操作: xx <- 1 等价于 obj.xx <- 1。
+  - using 的对象必须是实例或类；否则运行时抛 TypeError。
+  - 同一个块内重复 using 同一对象，检查器警告。
+
+* 示例
+class a(b, c):
+    def __init__():
+        b.xx()
+        c.xx()
+        using b
+        xx()        # 等价于 b.xx()
+        using c
+        xx()        # 等价于 c.xx()
+    end
+end
+
+* 约束
+  - using 不能跨函数。
+  - using 引入的成员在块结束后失效。
+  - using 的对象表达式只求值一次。
+
+================================================================
+十四、 解包 (* 和 **)
+================================================================
+1. 调用时解包
+  f(*args)                  args 是 list/tuple，展开为位置参数
+  f(**kwargs)               kwargs 是 dict，展开为关键字参数
+  f(a, *args, b=1, **kwargs)
+
+  - *expr 要求 expr 是 list 或 tuple，按顺序展开。
+  - **expr 要求 expr 是 dict，键必须是 str。
+  - 展开后和显式参数/关键字冲突时抛 TypeError。
+  - **kwargs 必须在参数列表最后。
+
+2. 函数定义时收集
+  def f(int a, *args, int key = 1, **kwargs) -> none:
+  end
+
+  - *args 收集多余位置参数为 list。
+  - **kwargs 收集多余关键字参数为 dict。
+  - *args 之后、**kwargs 之前的参数必须是关键字参数。
+
+3. 字面量解包
+  a <- [1, 2, *other]        list 展开
+  b <- {**d1, **d2, "k": 1}  dict 展开，后面的键覆盖前面的
+  c <- (1, *t)               tuple 展开
+
+  - * 只能出现在 list/tuple 里，** 只能出现在 dict 里。
+  - *expr 要求 expr 是 list 或 tuple。
+  - **expr 要求 expr 是 dict，键必须是 str。
+
+4. 赋值解包
+  a, *rest <- [1, 2, 3, 4]   a=1, rest=[2, 3, 4]
+  a, b, *rest <- [1, 2, 3]   a=1, b=2, rest=[3]
+  *init, last <- [1, 2, 3]   init=[1, 2], last=3
+  a, *mid, z <- [1, 2, 3, 4] a=1, mid=[2, 3], z=4
+
+  - 左侧用逗号分隔，最多一个 *name，其余是普通变量。
+  - 右侧必须是 list 或 tuple。
+  - *name 收集中间剩余元素为 list；没有剩余时为空 list。
+  - 元素数量不足时抛 ValueError。
+  - a, *rest <- ... 里的 *rest 不能和 a 重名。
+
+5. 约束
+  - 解包的对象类型不匹配时抛 TypeError。
+  - ** 的键不是 str 时抛 TypeError。
+  - 赋值解包里 *name 只能出现一次。
+
+================================================================
+十五、 内置函数
+================================================================
+1. 输入输出
+  print(*args) -> none        打印参数，空格分隔，换行
+  write(*args) -> none        打印参数，不换行
+  input(str prompt = "") -> str   读一行
+  eprint(*args) -> none       输出到 stderr
+
+2. 类型转换
+  int(any) -> int             转整数
+  float(any) -> float         转 64 位浮点
+  double(any) -> double       转 128 位浮点
+  str(any) -> str             转字符串
+  bool(any) -> bool           真值转换
+  bi(any) -> bi               转 BigInt
+  type(any) -> str            返回类型名
+  code(str) -> code           字符串转代码对象
+
+3. 容器与序列
+  len(any) -> int             长度 (str/list/dict/tuple)
+  range(int stop) -> list
+  range(int start, int stop, int step = 1) -> list
+  list(any) -> list
+  tuple(any) -> tuple
+  dict(any) -> dict
+  list.append(any) -> none    列表尾插
+  dict.get(any key, any default = none) -> any
+  dict.keys() -> list
+  dict.values() -> list
+  dict.has(any key) -> bool
+  slice(list, int start, int end) -> list
+
+4. 数学
+  abs(int/float/double) -> 同类型
+  max(*args) -> any
+  min(*args) -> any
+  sum(list) -> int/float
+  pow(base, exp) -> any
+  sqrt(float/double) -> float/double
+  floor(float/double) -> int
+  ceil(float/double) -> int
+  round(float/double, int digits = 0) -> float/double
+  random() -> float
+  random(int n) -> int
+
+5. 字符串
+  str.upper() -> str
+  str.lower() -> str
+  str.strip() -> str
+  str.split(str sep = " ") -> list
+  str.join(list) -> str
+  str.find(str sub) -> int
+  str.replace(str old, str new) -> str
+  str.format(*args) -> str     (可选)
+
+6. 内存与资源
+  free(any) -> null           释放，值置 null
+  clone(any) -> any           深拷贝 (可选)
+
+7. 异常
+  Exception(str msg = "")
+  ValueError / TypeError / IndexError / KeyError / ZeroDivisionError /
+  RuntimeError / NameError / DllNotFoundError
+
+8. 代码对象
+  code(str) -> code
+  code.run() -> none
+
+9. 其他
+  id(any) -> int              对象身份 (可选)
+  hash(any) -> int            哈希值 (可选)
+  exit(int code = 0) -> never 退出程序
+
+================================================================
+十六、 struct (结构体)
+================================================================
+struct POINT:
+    i32 x
+    i32 y
+end
+
+struct RECT:
+    i32 left
+    i32 top
+    i32 right
+    i32 bottom
+end
+
+* 语义
+  - struct 是值类型，字段按声明顺序布局，对齐规则同 C。
+  - 字段类型: bool / i32 / i64 / int / float / double / str / cstr / ptr / 嵌套 struct。
+  - 在 ECL 里用 dict 表示: {"x": 0, "y": 0}。
+  - struct 只在 dll_import 的函数签名里使用，不能作为普通变量类型。
+
+* 布局
+  - bool / i32 → 4 字节
+  - i64 / int / str / cstr / ptr / double → 8 字节
+  - float → 4 字节
+  - 嵌套 struct 按内层大小对齐
+
+================================================================
+十七、 dll_import (动态链接库)
+================================================================
+dll_import "user32.dll":
+    def MessageBoxW(int hwnd, str text, str caption, int flags) -> int
+    def GetCursorPos(ptr POINT point) -> int
+    def GetWindowRect(int hwnd, out RECT rect) -> int
+end
+
+* 语义
+  - dll_import 在运行时 LoadLibrary 加载 DLL。
+  - 块里的 def 声明函数签名，没有函数体。
+  - 函数名进入当前作用域，可直接调用或用 using 引入。
+  - 同一个 DLL 可以多次 dll_import，追加函数声明。
+  - 路径可以是相对/绝对路径，或系统 DLL 名。
+
+* 参数修饰
+  - 默认: 按值传（标量走寄存器，结构体走隐藏指针）。
+  - ptr: 传指针，调用前后都同步。
+  - in: 传指针，调用前写，调用后不读。
+  - out: 传指针，调用前不写，调用后读。
+  - 结构体参数默认按值传；Win32 API 大多要 ptr / in / out。
+
+* 类型映射
+  - bool → BOOL (4 字节)
+  - i32 → int32_t / LONG (4 字节)
+  - i64 → int64_t / LONGLONG (8 字节)
+  - int → int64_t (8 字节)
+  - float → float (xmm)
+  - double → double (xmm)
+  - str → wchar_t* (UTF-8 转 UTF-16)
+  - cstr → char* (UTF-8 直接传)
+  - ptr → void*
+  - none 返回 → void
+
+* 错误
+  - DLL 找不到 → DllNotFoundError
+  - 函数找不到 → AttributeError
+  - 调用失败 → OSError
+
+* 安全
+  - REPL 默认允许 dll_import，可用 --no-dll 禁用。
+  - AOT 编译时 dll_import 不影响链接，运行时解析。
+
+================================================================
+十八、 编译目标 (target)
+================================================================
+python main.py compile test.ecl --target asm    # 生成 .asm
+python main.py compile test.ecl --target exe    # 生成 .exe
+python main.py compile test.ecl --target dll    # 生成 .dll
+
+* --target asm
+  - 只生成 .asm，不汇编、不链接。
+
+* --target exe
+  - 生成独立可执行文件，无 CRT，/ENTRY:startup。
+  - main 是入口，`startup` 调 `main` 后 `ExitProcess`。
+
+* --target dll
+  - 只导出 public def 的顶层函数。
+  - 导出函数的参数/返回值必须是 C ABI 类型：
+    int / i64 / i32 / float / double / bool / str / cstr / ptr / none。
+  - list / dict / tuple / class 不能作为导出函数的参数/返回值。
+  - 类方法不导出（没有 C ABI 的 self）。
+  - str 导出为 wchar_t*，由 ECL 分配、宿主释放。
+  - 异常在 C ABI 边界上 abort + 打印，不跨边界传播。
+  - .dll 里的 dll_import 仍然可用（运行时 LoadLibrary）。
+  - 无 CRT，/DLL /NOENTRY /NODEFAULTLIB。
+  - 导出函数名不能重载（C ABI 没有重载）。
+  - 导出函数名不能和 dll_import 声明的函数名冲突。
+
+* 宿主调用示例 (C)
+  HMODULE h = LoadLibraryA("test.dll");
+  int64_t (*add)(int64_t, int64_t) =
+      (int64_t (*)(int64_t, int64_t))GetProcAddress(h, "add");
+  printf("%lld\n", add(1, 2));
+
+* 导出类型映射
+  - int → int64_t
+  - i64 → int64_t
+  - i32 → int32_t
+  - float → float (xmm)
+  - double → double (xmm)
+  - bool → int32_t (BOOL)
+  - str → wchar_t* (UTF-16)
+  - cstr → char*
+  - ptr → void*
+  - none → void
+
+================================================================
+十九、 特殊说明
+================================================================
+1. 分号忽略: 末尾的分号会被忽略，中间的分号会被当作换行，多个分号按一个计算。
+2. 注释规范:
+   - 单行注释: #
+   - 多行注释: /* ... */
+   - 文档注释: ///
+3. 空值规则:
+   - none 是唯一的"显式空值"，可以作为右值和返回值。
+   - null 表示未初始化/已释放，不能作为右值或返回值。
+   - unknown 表示未定义就使用的变量，不能作为右值或返回值。
+   - x <- null / x <- unknown / return null / return unknown 都是错误。
+4. 未定义变量:
+   - 使用未声明的变量会得到 unknown 值，并产生编译期警告。
+   - print(unknown) 输出 "unknown"。
+   - type(unknown) 返回 "unknown"。
+   - unknown 是 falsy，if unknown: 不成立。
+   - unknown 参与运算抛 TypeError。
+   - unknown == unknown 为 true，unknown == null / none 为 false。
+5. 变量类型:
+   - int 是任意精度，i64 是固定 64 位，i32 是固定 32 位，溢出回绕。
+   - float 是 64 位双精度，double 是 128 位高精度。
+6. 作用域限制:
+   - break / continue 只能在循环体内（match 内的 break 除外，见第十一节）。
+   - goto / label 不能跨函数。
+   - public / private 仅在 class 内或 DLL 导出时有效。
+   - ref 只能绑定变量，不能绑定 const 或字面量。
+   - using 不能跨函数，块结束失效。
+7. self 是隐式的:
+   - 方法定义里不写 self，self 不占参数位置。
+   - 方法体里直接使用 self，指向当前实例。
+   - 方法调用 obj.method() 不传 self。
+8. struct / dll_import 只用于和原生 DLL 交互，不影响纯 ECL 代码。
+9. i32 只用于 struct 字段和 dll_import 签名，普通变量用 int / i64。
+10. cstr / ptr 只用于 dll_import 签名，普通 ECL 代码用 str / int。
+11. dll_import 声明的函数名和 ECL 函数名冲突时，检查器报错。
+12. DLL 函数调用失败（参数类型不匹配、内存访问违规）会崩溃进程，
+    而不是抛 ECL 异常——这是原生调用的固有风险。
+13. --target dll 和 dll_import 是两个方向：
+    - --target dll：ECL 编译成 DLL，给宿主调用。
+    - dll_import：ECL 运行时调用外部 DLL。
+    两者可以同时使用：ECL 编译成 DLL 后，内部仍可 dll_import 其他 DLL。
+14. @@ 是纯语法糖:
+    - @@X(code) 脱糖为 X().__exec__(code)，X 是扁平类名。
+    - 不涉及点号访问、模块对象或特殊 IR 指令。
+    - 命名约定「模块名_类名」是文档建议，编译器只检查
+      「类存在且实现 __exec__」。
+    - import 扁平命名约定与 @@ 一致：模块成员以「模块名_成员名」暴露，
+      不使用点号访问。

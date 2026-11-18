@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECL - Easy Control Language</title>
+    <link rel="icon" type="image/png" href="icon.png">
+    <style>
+        :root {
+            --bg: #f5f5f7;
+            --card-bg: #ffffff;
+            --text: #1d1d1f;
+            --text-secondary: #86868b;
+            --border: #d2d2d7;
+            
+            /* Mac 终端深色背景和圆点颜色 */
+            --term-bg: #1e1e1e;
+            --term-text: #d4d4d4;
+            --dot-red: #ff5f56;
+            --dot-yellow: #ffbd2e;
+            --dot-green: #27c93f;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 80px 24px;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 80px;
+        }
+        .app-icon {
+            width: 120px;
+            height: 120px;
+            border-radius: 28px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04);
+            margin-bottom: 24px;
+            object-fit: contain;
+            background: #ffffff;
+        }
+        h1 {
+            font-size: 3.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin: 0 0 12px 0;
+            color: var(--text);
+        }
+        .tagline {
+            font-size: 1.5rem;
+            font-weight: 400;
+            color: var(--text-secondary);
+            letter-spacing: -0.01em;
+        }
+        .badges {
+            margin-top: 28px;
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .badge {
+            display: inline-block;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+        }
+        .badge span {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .section-title {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-top: 80px;
+            margin-bottom: 16px;
+            color: var(--text);
+        }
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-bottom: 32px;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .feature {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 28px;
+            border-radius: 18px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.02);
+        }
+        .feature h3 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text);
+            letter-spacing: -0.01em;
+        }
+        .feature p {
+            margin: 0;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        /* --- Mac 终端窗口样式 --- */
+        .code-header {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 40px 0 12px 0;
+            color: var(--text);
+            letter-spacing: -0.01em;
+        }
+        .window-frame {
+            background: var(--term-bg);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        .window-titlebar {
+            background: #282828;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #111;
+        }
+        .window-dots {
+            display: flex;
+            gap: 8px;
+        }
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .dot.red { background: var(--dot-red); }
+        .dot.yellow { background: var(--dot-yellow); }
+        .dot.green { background: var(--dot-green); }
+        
+        .window-frame pre {
+            margin: 0;
+            padding: 24px;
+            overflow-x: auto;
+            font-family: "SF Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+        }
+        .window-frame code {
+            font-family: inherit;
+            font-size: 0.9rem;
+            color: var(--term-text);
+            line-height: 1.6;
+        }
+        .inline-code {
+            background: rgba(0,0,0,0.05);
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-family: "SF Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: 0.9em;
+        }
+        footer {
+            text-align: center;
+            margin-top: 100px;
+            padding-top: 40px;
+            border-top: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <img src="icon.png" alt="ECL Icon" class="app-icon">
+            <h1>ECL</h1>
+            <div class="tagline">简单, 兼容, 极致 —— Easy Coding Language</div>
+            <div class="badges">
+                <div class="badge"><span>原生</span> AOT 编译</div>
+                <div class="badge"><span>无</span> CRT 依赖</div>
+                <div class="badge"><span>13KB</span> 的极简 EXE</div>
+                <div class="badge"><span>100%</span> 开源工具链</div>
+            </div>
+        </header>
+
+        <h2 class="section-title">为什么选择 ECL？</h2>
+        <p class="section-desc">用极致的设计，平衡底层的控制力与高层的开发效率。</p>
+        <div class="features">
+            <div class="feature">
+                <h3>写起来像 Python</h3>
+                <p>动态类型、内置字典和列表、字符串插值、match-case。没有任何冗余语法，让你专注于业务逻辑。</p>
+            </div>
+            <div class="feature">
+                <h3>跑起来像 C</h3>
+                <p>AOT 编译为原生机器码，零虚拟机开销。极小的运行体积，不需要安装环境，双击 exe 即可运行。</p>
+            </div>
+            <div class="feature">
+                <h3>无缝的底层互操作</h3>
+                <p>通过 <span class="inline-code">dll_import</span> 直接调用系统 API。没有繁琐的 FFI 胶水代码，完美的 C ABI 兼容。</p>
+            </div>
+            <div class="feature">
+                <h3>极简的内存模型</h3>
+                <p>默认深拷贝保证绝对安全，变量槽位独立。没有引用计数，没有 GC 停顿，底层裸内存由极客显式管理。</p>
+            </div>
+        </div>
+
+        <h2 class="section-title">极简代码示例</h2>
+        
+        <div class="code-header">1. 基础脚本 (像 Python 一样丝滑)</div>
+        <div class="window-frame">
+            <div class="window-titlebar">
+                <div class="window-dots">
+                    <div class="dot red"></div>
+                    <div class="dot yellow"></div>
+                    <div class="dot green"></div>
+                </div>
+            </div>
+            <pre><code>def process_users(list users):
+    for u in users:
+        u["status"] <- "active"
+    end
+    return users
+end
+
+# 自动推断类型，无需手动申请内存
+data <- [{"name": "Alice"}, {"name": "Bob"}]
+active <- process_users(data)
+print("第一个用户状态:", active[0]["status"])
+free(data)</code></pre>
+        </div>
+
+        <div class="code-header">2. 底层交互 (像 C 一样硬核)</div>
+        <div class="window-frame">
+            <div class="window-titlebar">
+                <div class="window-dots">
+                    <div class="dot red"></div>
+                    <div class="dot yellow"></div>
+                    <div class="dot green"></div>
+                </div>
+            </div>
+            <pre><code>struct POINT:
+    i32 x
+    i32 y
+end
+
+dll_import "user32.dll":
+    def GetCursorPos(POINT* pt) -> i32
+end
+
+p <- POINT()
+if GetCursorPos(&p) != 0:
+    print("鼠标坐标:", p.x, p.y)
+end</code></pre>
+        </div>
+
+        <div class="code-header">3. 多语言寄生 (极致的生态融合)</div>
+        <div class="window-frame">
+            <div class="window-titlebar">
+                <div class="window-dots">
+                    <div class="dot red"></div>
+                    <div class="dot yellow"></div>
+                    <div class="dot green"></div>
+                </div>
+            </div>
+            <pre><code>import py
+code <- """
+print(1)
+"""
+ctx <- @@py_py(code)       # 脱糖为 py_py().__exec__(code)
+result <- ctx.run()
+print("Python 算出来的结果是:", result) # 8</code></pre>
+        </div>
+
+        <h2 class="section-title">如何构建</h2>
+        <p class="section-desc">ECL 的编译工具链完全开源且绿色免安装（UASM + LLVM），你只需要一个 Python 即可启动：</p>
+        <div class="window-frame">
+            <div class="window-titlebar">
+                <div class="window-dots">
+                    <div class="dot red"></div>
+                    <div class="dot yellow"></div>
+                    <div class="dot green"></div>
+                </div>
+            </div>
+            <pre><code># 运行脚本
+python main.py run example/hello.ecl
+
+# 编译为原生的 13KB 独立 exe
+python main.py compile example/hello.ecl --target exe
+
+# 编译为 C ABI 兼容的动态库
+python main.py compile example/lib.ecl --target dll</code></pre>
+        </div>
+
+        <footer>
+            &copy; 2026 ECL Project. Built with extreme minimalism.
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+*.obj
+*.asm
+!setjmp.asm
+*.exe
+!uasm64.exe
+!lld-link.exe
+!clang-cl.exe
+__pycache__/
+*.pyc
+*.eclc
+*.def
+*.dll
+*.lib
+tests/.tmp/

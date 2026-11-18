@@ -3,14 +3,23 @@
 """
 ECL (Easy Control Language) 解释器 / AOT 编译器 / 缓存工具
 
-用法:
-  python main.py                                 # 交互式 REPL
-  python main.py test.ecl                        # 解释执行（兼容旧用法）
-  python main.py run test.ecl                    # 解释执行
-  python main.py compile test.ecl                # AOT 编译到 .asm
-  python main.py compile test.ecl --target exe   # AOT 编译到 .exe
-  python main.py dump test.eclc                  # 反汇编缓存为文本
-  python main.py load test.eclc.txt -o x.eclc    # 从文本重建缓存（调试用）
+用法（打包成 exe 后，假设可执行文件为 main.exe）:
+  main                                         # 交互式 REPL
+  main test.ecl                                # 解释执行（兼容旧用法）
+  main run test.ecl                            # 解释执行
+  main compile test.ecl                        # AOT 编译到 .asm
+  main compile test.ecl --target exe           # AOT 编译到 .exe
+  main dump test.eclc                          # 反汇编缓存为文本
+  main load test.eclc.txt -o x.eclc            # 从文本重建缓存（调试用）
+
+用法（用 Python 运行）:
+  python main.py                               # 交互式 REPL
+  python main.py test.ecl                      # 解释执行（兼容旧用法）
+  python main.py run test.ecl                  # 解释执行
+  python main.py compile test.ecl              # AOT 编译到 .asm
+  python main.py compile test.ecl --target exe # AOT 编译到 .exe
+  python main.py dump test.eclc                # 反汇编缓存为文本
+  python main.py load test.eclc.txt -o x.eclc  # 从文本重建缓存（调试用）
 """
 
 import argparse
@@ -739,9 +748,20 @@ def run_repl(args):
 # 命令行
 # ============================================================
 
+def prog_name():
+    """根据运行方式确定 -h / usage 中显示的程序名。
+
+    - 打包后的 exe（sys.frozen 存在）：显示 exe 文件名（如 main）
+    - 用 python 运行：显示 python main.py
+    """
+    if getattr(sys, 'frozen', False) or '__compiled__' in globals():
+        return pathlib.Path(sys.argv[0]).stem or 'main'
+    return 'python ecl.py'
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog='ecl',
+        prog=prog_name(),
         description='ECL (Easy Control Language) 解释器 / AOT 编译器 / 缓存工具',
     )
     parser.add_argument('--no-dll', action='store_true',

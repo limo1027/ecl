@@ -210,6 +210,11 @@ print(int("0o755"))
 print(int("1_000_000"))
 print(int(" 3 ") + int("4"))
 print(i64("7"))
+print(int("18446744073709551615"))
+print(int("18446744073709551615") * 7)
+print(int(int("18446744073709551615")))
+print(i64("18446744073709551615"))
+print(i64("18446744073709551615") * 7)
 '''
         with temp_dir() as tmp:
             source = tmp / 'int_string.ecl'
@@ -220,7 +225,11 @@ print(i64("7"))
                 encoding='utf-8', errors='replace', env=_subprocess_env())
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout,
-                         '42\n-7\n255\n10\n493\n1000000\n7\n7\n')
+                         '42\n-7\n255\n10\n493\n1000000\n7\n7\n'
+                         '18446744073709551615\n'
+                         '129127208515966861305\n'
+                         '18446744073709551615\n'
+                         '-1\n-7\n')
 
     def test_remove_output(self):
         """--remove-output 只保留最终 .exe，清理中间产物和缓存。"""

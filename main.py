@@ -31,15 +31,26 @@ from asm import AsmGenerator
 from optimizer import Optimizer
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
-LOCAL_ASSEMBLER = ROOT_DIR / 'uasm64.exe'
-LOCAL_LINKER = ROOT_DIR / 'lld-link.exe'
-LOCAL_COMPILER = ROOT_DIR / 'clang-cl.exe'
+
+
+def runtime_path(relative: str) -> pathlib.Path:
+    """获取工具/运行时路径：打包后基于 exe 所在目录，开发时基于脚本目录"""
+    if getattr(sys, 'frozen', False):
+        base = pathlib.Path(sys.executable).resolve().parent
+    else:
+        base = pathlib.Path(__file__).resolve().parent
+    return base / relative
+
+
+ROOT_DIR = runtime_path(".")
+LOCAL_ASSEMBLER = runtime_path("uasm64.exe")
+LOCAL_LINKER = runtime_path("lld-link.exe")
+LOCAL_COMPILER = runtime_path("clang-cl.exe")
 
 
 # ============================================================
 # 编译（带缓存）
 # ============================================================
-
 # 模块搜索目录（与 checker / compiler 保持一致）
 MODULE_SEARCH_DIRS = (pathlib.Path('.'), pathlib.Path('example'),
                       pathlib.Path('lib'))

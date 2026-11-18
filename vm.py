@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from errors import EclException, LexerError, ReturnSignal
 from class_and_vars import (NULL, UNKNOWN, Cell, EclInstance, Program,
                             EclFunction, EclClass, EclOverload,
@@ -182,7 +180,8 @@ class VM:
     # ---------- with 上下文 ----------
 
     def _call_leave(self, ctx, exc_type, exc_value):
-        result = self.interpreter.call_value(ctx['leave'], [exc_type, exc_value], {})
+        result = self.interpreter.call_value(
+            ctx['leave'], [exc_type, exc_value], {})
         return self.interpreter._truthy(result)
 
     def _unwind_with_for_exception(self, e):
@@ -288,10 +287,12 @@ class VM:
 
         elif kind == 'neg':
             _, dest, src = op
-            self.temps[dest] = self.interpreter.native_unary('-', self.temps[src])
+            self.temps[dest] = self.interpreter.native_unary(
+                '-', self.temps[src])
         elif kind == 'invert':
             _, dest, src = op
-            self.temps[dest] = self.interpreter.native_unary('~', self.temps[src])
+            self.temps[dest] = self.interpreter.native_unary(
+                '~', self.temps[src])
         elif kind == 'not':
             _, dest, src = op
             self.temps[dest] = not self.interpreter._truthy(self.temps[src])

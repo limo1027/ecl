@@ -508,6 +508,8 @@ void runtime_call_kw(Value* result, Value* f, Value** args, int64_t* pair);
 void runtime_get_attr(Value* out, Value* obj, const char* name);
 void runtime_str(Value* result, Value* v);
 void runtime_int(Value* result, Value* v);
+void runtime_to_i64(Value* result, Value* v);
+void runtime_to_i32(Value* result, Value* v);
 void runtime_float(Value* result, Value* v);
 void runtime_lt(Value* result, Value* a, Value* b);
 void runtime_add(Value* result, Value* a, Value* b);
@@ -1779,18 +1781,11 @@ void runtime_builtin_call(Value* result, const char* name, Value** args,
         return;
     }
     if (my_strcmp(name, "i64") == 0) {
-        if (argc) {
-            runtime_int(result, args[0]);
-            result->tag = VAL_I64;
-        }
+        if (argc) runtime_to_i64(result, args[0]);
         return;
     }
     if (my_strcmp(name, "i32") == 0) {
-        if (argc) {
-            runtime_int(result, args[0]);
-            result->tag = VAL_I32;
-            result->i = (int32_t)result->i;
-        }
+        if (argc) runtime_to_i32(result, args[0]);
         return;
     }
     if (my_strcmp(name, "bi") == 0) {
@@ -2821,9 +2816,8 @@ void runtime_len(Value* result, Value* v) {
     else if (v->tag == VAL_BUFFER) result->i = ((EclBuffer*)v->ptr)->size;
     else result->i = 0;
 }
-// 解析 int("...")：支持空白、正负号、0x/0o/0b 前缀和下划线。
-// 返回值按 64 位回绕（AOT 的 int 实际是 int64）。
-static int parse_int_string(const char* s, int64_t* out) {
+// 把字符串解析成任意精度整数：支持空白、正负号、0x/0o/0b 前缀和下划线。
+static int parse_int_bigint(const char* s, EclBigInt* out) {
     while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n' ||
            *s == '\v' || *s == '\f') s++;
     int neg = 0;
@@ -2833,12 +2827,12 @@ static int parse_int_string(const char* s, int64_t* out) {
     else if (s[0] == '0' && (s[1] == 'o' || s[1] == 'O')) { base = 8; s += 2; }
     else if (s[0] == '0' && (s[1] == 'b' || s[1] == 'B')) { base = 2; s += 2; }
 
-    uint64_t acc = 0;
+    bi_init(out);
     int digits = 0, last_digit = 0, last_us = 0;
     while (*s) {
         char c = *s;
         if (c == '_') {
-            if (!last_digit) return 0;
+            if (!last_digit) goto fail;
             last_digit = 0;
             last_us = 1;
             s++;
@@ -2850,44 +2844,127 @@ static int parse_int_string(const char* s, int64_t* out) {
         else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
         else break;
         if (d >= base) break;
-        acc = acc * (uint64_t)base + (uint64_t)d;
+
+        // out = out * base + d
+        uint64_t carry = (uint64_t)d;
+        for (size_t i = 0; i < out->len; i++) {
+            uint64_t cur = (uint64_t)out->limbs[i] * (uint64_t)base + carry;
+            out->limbs[i] = (uint32_t)(cur & LIMB_MASK);
+            carry = cur >> LIMB_BITS;
+        }
+        while (carry) {
+            bi_reserve(out, out->len + 1);
+            out->limbs[out->len++] = (uint32_t)(carry & LIMB_MASK);
+            carry >>= LIMB_BITS;
+        }
         digits++;
         last_digit = 1;
         last_us = 0;
         s++;
     }
-    if (!digits || last_us) return 0;
+    if (!digits || last_us) goto fail;
     while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n' ||
            *s == '\v' || *s == '\f') s++;
-    if (*s) return 0;
-    if (neg) acc = (uint64_t)(0 - acc);
-    *out = (int64_t)acc;
+    if (*s) goto fail;
+    if (out->len > 0) out->sign = neg ? -1 : 1;
     return 1;
+
+fail:
+    no_crt_free(out->limbs);
+    out->limbs = NULL;
+    out->len = 0;
+    out->cap = 0;
+    out->sign = 0;
+    return 0;
+}
+
+static int bigint_fits_i64(const EclBigInt* b) {
+    if (b->len == 0) return 1;
+    if (b->len > 2) return 0;
+    uint64_t mag = (uint64_t)b->limbs[0];
+    if (b->len == 2) mag |= (uint64_t)b->limbs[1] << 32;
+    if (b->sign < 0) return mag <= ((uint64_t)1 << 63);
+    return mag <= 0x7FFFFFFFFFFFFFFFULL;
+}
+
+static int64_t bigint_low_i64(const EclBigInt* b) {
+    uint64_t r = 0;
+    if (b->len > 0) r = (uint64_t)b->limbs[0];
+    if (b->len > 1) r |= (uint64_t)b->limbs[1] << 32;
+    if (b->sign < 0) r = (uint64_t)(0 - r);
+    return (int64_t)r;
 }
 
 void runtime_int(Value* result, Value* v) {
-    result->tag = VAL_INT;
-    if (v->tag == VAL_INT || v->tag == VAL_I64 || v->tag == VAL_I32 || v->tag == VAL_BOOL) result->i = v->i;
-    else if (v->tag == VAL_FLOAT || v->tag == VAL_DOUBLE) result->i = (int64_t)v->f;
-    else if (v->tag == VAL_BIGINT) {
-        EclBigInt* b = (EclBigInt*)v->ptr;
-        int64_t r = 0;
-        for (size_t i = 0; i < b->len && i < 2; i++) {
-            r |= ((int64_t)b->limbs[i] << (32 * i));
+    if (v->tag == VAL_INT || v->tag == VAL_I64 || v->tag == VAL_I32 || v->tag == VAL_BOOL) {
+        int64_t x = v->i;
+        result->tag = VAL_INT;
+        result->i = x;
+    } else if (v->tag == VAL_FLOAT || v->tag == VAL_DOUBLE) {
+        int64_t x = (int64_t)v->f;
+        result->tag = VAL_INT;
+        result->i = x;
+    } else if (v->tag == VAL_BIGINT) {
+        // int(BigInt) 保持任意精度；result == v 时无需处理
+        if (result != v) {
+            *result = *v;
+            value_share(result);
         }
-        result->i = b->sign < 0 ? -r : r;
-    }
-    else if (v->tag == VAL_STR) {
-        int64_t parsed = 0;
-        if (!parse_int_string(v->s, &parsed)) {
+    } else if (v->tag == VAL_STR) {
+        EclBigInt bi;
+        if (!parse_int_bigint(v->s, &bi)) {
+            result->tag = VAL_INT;
             result->i = 0;
             runtime_raise_error("TypeError: 无法将 str 转换为 int");
             return;
         }
-        result->i = parsed;
+        if (bigint_fits_i64(&bi)) {
+            int64_t x = bigint_low_i64(&bi);
+            result->tag = VAL_INT;
+            result->i = x;
+            no_crt_free(bi.limbs);
+        } else {
+            EclBigInt* heap = (EclBigInt*)no_crt_alloc(sizeof(EclBigInt));
+            *heap = bi;
+            result->tag = VAL_BIGINT;
+            result->ptr = heap;
+        }
+    } else {
+        result->tag = VAL_INT;
+        result->i = 0;
     }
-    else result->i = 0;
 }
+
+// i64()/i32()/返回类型 i64：按 64 位补码回绕。
+void runtime_to_i64(Value* result, Value* v) {
+    if (v->tag == VAL_BIGINT) {
+        result->tag = VAL_I64;
+        result->i = bigint_low_i64((EclBigInt*)v->ptr);
+        return;
+    }
+    if (v->tag == VAL_STR) {
+        EclBigInt bi;
+        if (!parse_int_bigint(v->s, &bi)) {
+            result->tag = VAL_I64;
+            result->i = 0;
+            runtime_raise_error("TypeError: 无法将 str 转换为 i64");
+            return;
+        }
+        result->tag = VAL_I64;
+        result->i = bigint_low_i64(&bi);
+        no_crt_free(bi.limbs);
+        return;
+    }
+    runtime_int(result, v);
+    result->tag = VAL_I64;
+}
+
+void runtime_to_i32(Value* result, Value* v) {
+    runtime_to_i64(result, v);
+    result->tag = VAL_I32;
+    result->i = (int32_t)result->i;
+}
+
 void runtime_float(Value* result, Value* v) {
     result->tag = VAL_FLOAT;
     if (v->tag == VAL_FLOAT || v->tag == VAL_DOUBLE) result->f = v->f;
@@ -3079,12 +3156,9 @@ void runtime_convert(Value* out, Value* v, const char* type) {
     if (my_strcmp(type, "int") == 0) {
         runtime_int(out, v);
     } else if (my_strcmp(type, "i64") == 0) {
-        runtime_int(out, v);
-        out->tag = VAL_I64;
+        runtime_to_i64(out, v);
     } else if (my_strcmp(type, "i32") == 0) {
-        runtime_int(out, v);
-        out->tag = VAL_I32;
-        out->i = (int32_t)out->i;
+        runtime_to_i32(out, v);
     } else if (my_strcmp(type, "float") == 0) {
         runtime_float(out, v);
     } else if (my_strcmp(type, "double") == 0) {

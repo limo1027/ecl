@@ -10,7 +10,7 @@ class py:
         return self
     end
 
-    def run() -> i64:
+    def run() -> int:
         if self.tokens[0] == "mul":
             return int(self.tokens[1]) * int(self.tokens[2])
         elif self.tokens[0] == "add":

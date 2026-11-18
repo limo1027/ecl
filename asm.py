@@ -147,6 +147,7 @@ class AsmGenerator:
                      'runtime_write', 'runtime_write_space', 'runtime_truthy', 'runtime_new_function',
                      'runtime_func_set_defaults', 'runtime_call', 'runtime_str', 'runtime_len',
                      'runtime_int', 'runtime_float', 'runtime_bool', 'runtime_type', 'runtime_range',
+                     'runtime_to_i64', 'runtime_to_i32',
                      'runtime_new_class', 'runtime_class_add_method', 'runtime_get_attr',
                      'runtime_set_attr', 'runtime_new_list', 'runtime_list_append',
                      'runtime_new_dict', 'runtime_dict_set', 'runtime_get_item', 'runtime_set_item',

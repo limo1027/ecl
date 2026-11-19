@@ -1,0 +1,165 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ECL",
+  "scopeName": "source.ecl",
+  "patterns": [
+    { "include": "#block-comments" },
+    { "include": "#doc-comments" },
+    { "include": "#line-comments" },
+    { "include": "#external-lang" },
+    { "include": "#code-literals" },
+    { "include": "#strings" },
+    { "include": "#types" },
+    { "include": "#keywords" },
+    { "include": "#builtin-funcs" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#functions" },
+    { "include": "#labels" },
+    { "include": "#variables" }
+  ],
+  "repository": {
+    "line-comments": {
+      "name": "comment.line.number-sign.ecl",
+      "match": "#.*$"
+    },
+    "doc-comments": {
+      "name": "comment.line.triple-slash.ecl",
+      "match": "///.*$"
+    },
+    "block-comments": {
+      "name": "comment.block.ecl",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    "external-lang": {
+      "name": "keyword.other.special.ecl",
+      "match": "@@[A-Za-z_]\\w*"
+    },
+    "code-literals": {
+      "name": "string.code.ecl",
+      "begin": "`",
+      "end": "`",
+      "patterns": [{ "include": "#interpolation" }]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.ecl",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            { "include": "#string-escapes" },
+            { "include": "#interpolation" }
+          ]
+        },
+        {
+          "name": "string.quoted.double.ecl",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "include": "#string-escapes" },
+            { "include": "#interpolation" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.ecl",
+          "begin": "'",
+          "end": "'"
+        }
+      ]
+    },
+    "string-escapes": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.dollar.ecl",
+          "match": "\\$\\$"
+        },
+        {
+          "name": "constant.character.escape.ecl",
+          "match": "\\\\[nrt\\\\\"']"
+        }
+      ]
+    },
+    "interpolation": {
+      "patterns": [
+        {
+          "name": "meta.interpolation.expression.ecl",
+          "match": "(?<!\\$)\\$\\{[^}]*\\}"
+        },
+        {
+          "name": "meta.interpolation.variable.ecl",
+          "match": "(?<!\\$)\\$[A-Za-z_]\\w*"
+        }
+      ]
+    },
+    "types": {
+      "name": "support.type.ecl",
+      "match": "\\b(int|i64|i32|float|double|bool|list|dict|tuple|code|str|cstr|ptr|none|null|unknown|any|public|private|const)\\b"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.ecl",
+          "match": "\\b(if|elif|else|while|for|in|match|case|try|except|finally|as|with|using|return|break|continue|goto|raise|end)\\b"
+        },
+        {
+          "name": "keyword.declaration.ecl",
+          "match": "\\b(def|class|struct|import|from|define|ref|global|last|self|dll_import)\\b"
+        },
+        {
+          "name": "constant.language.ecl",
+          "match": "\\b(True|False|true|false)\\b"
+        }
+      ]
+    },
+    "builtin-funcs": {
+      "name": "support.function.builtin.ecl",
+      "match": "\\b(print|write|input|eprint|bi|type|code|len|range|slice|abs|max|min|sum|pow|sqrt|floor|ceil|round|random|free|clone|id|hash|exit|Exception|ValueError|TypeError|IndexError|KeyError|ZeroDivisionError|RuntimeError|NameError|DllNotFoundError)\\b"
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.ecl",
+          "match": "\\b0x[0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.ecl",
+          "match": "\\b0b[01_]+\\b"
+        },
+        {
+          "name": "constant.numeric.octal.ecl",
+          "match": "\\b0o[0-7_]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.double.ecl",
+          "match": "\\b\\d[\\d_]*\\.\\d[\\d_]*d\\b"
+        },
+        {
+          "name": "constant.numeric.float.ecl",
+          "match": "\\b\\d[\\d_]*(\\.[\\d_]*)?(e[+-]?\\d+)?\\b"
+        }
+      ]
+    },
+    "operators": {
+      "name": "keyword.operator.ecl",
+      "match": "<->|<-|\\.\\.=|\\.\\.|\\*\\*|//|==|!=|<=|>=|\\+=|-=|\\*=|/=|%=|&&|\\|\\||[+\\-*/%<>=!&|^~]"
+    },
+    "functions": {
+      "name": "entity.name.function.ecl",
+      "match": "\\b([A-Za-z_]\\w*)(?=\\s*\\()"
+    },
+    "labels": {
+      "name": "entity.name.tag.ecl",
+      "match": "^\\s*(label\\s+)?([A-Za-z_]\\w*)\\s*:\\s*(#.*)?$",
+      "captures": {
+        "1": { "name": "keyword.control.ecl" },
+        "2": { "name": "entity.name.tag.ecl" }
+      }
+    },
+    "variables": {
+      "name": "variable.other.ecl",
+      "match": "\\b[A-Za-z_]\\w*\\b"
+    }
+  }
+}

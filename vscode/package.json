@@ -1,0 +1,72 @@
+{
+  "name": "ecl-language",
+  "displayName": "ECL Language",
+  "description": "ECL 自研语言支持：高亮、诊断、悬停、补全、跳转、运行",
+  "version": "0.2.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ecl",
+        "aliases": [
+          "ECL",
+          "ecl"
+        ],
+        "extensions": [
+          ".ecl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ecl",
+        "scopeName": "source.ecl",
+        "path": "./syntaxes/ecl.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "ecl.run",
+        "title": "ECL: 运行当前文件"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ecl.run",
+        "key": "f5",
+        "when": "editorLangId == ecl"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "ecl.run",
+          "when": "editorLangId == ecl",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://example.com/ecl-language.git"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "vscode-languageclient": "^11.0.0"
+  }
+}

@@ -1025,3 +1025,31 @@ class Interpreter:
         except ReturnSignal:
             pass
         return None
+
+    # ============================================================
+    # REPL 钩子 (ecl_repl.py 使用)
+    # ============================================================
+
+    def set_global(self, name, value):
+        """REPL 的 _ 回写。globals 是 name -> Cell,所以包一层 Cell"""
+        self.globals[name] = Cell(value)
+
+    def list_globals(self):
+        """REPL 的 dir()。返回所有全局名(含内置),过滤下划线开头可选"""
+        return sorted(self.globals.keys())
+
+    def get_global(self, name):
+        """REPL 的 ?x 读取。不存在返回 UNKNOWN 而不是报错"""
+        cell = self.globals.get(name)
+        return cell.value if cell is not None else UNKNOWN
+
+    def type_of(self, value):
+        """REPL 的 ?x 类型显示。直接复用 _builtin_type"""
+        return self._builtin_type(value)
+
+    def repr_value(self, value):
+        """REPL 的回显格式。优先 __str__,再兜底 repr"""
+        try:
+            return self._builtin_str(value)
+        except Exception:
+            return repr(value)

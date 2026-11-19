@@ -608,11 +608,13 @@ class AsmGenerator:
                 self.emit(f"    mov qword ptr [rbp{dst + 8}], rax")
             elif t == 'i32':
                 self.emit(f"    mov qword ptr [rbp{dst}], 22")
-                self.emit(f"    movsxd rax, dword ptr {self._mem(self._src_off(i, t, save_i, save_f))}")
+                self.emit(
+                    f"    movsxd rax, dword ptr {self._mem(self._src_off(i, t, save_i, save_f))}")
                 self.emit(f"    mov qword ptr [rbp{dst + 8}], rax")
             elif t == 'bool':
                 self.emit(f"    mov qword ptr [rbp{dst}], 19")
-                self.emit(f"    mov eax, dword ptr {self._mem(self._src_off(i, t, save_i, save_f))}")
+                self.emit(
+                    f"    mov eax, dword ptr {self._mem(self._src_off(i, t, save_i, save_f))}")
                 self.emit(f"    mov qword ptr [rbp{dst + 8}], rax")
             elif t == 'float':
                 self.emit(f"    mov qword ptr [rbp{dst}], 1")
@@ -630,7 +632,8 @@ class AsmGenerator:
                 if i < 4:
                     self.emit(f"    mov rcx, qword ptr [rbp{save_i[i]}]")
                 else:
-                    self.emit(f"    mov rcx, qword ptr {self._mem(48 + 8 * (i - 4))}")
+                    self.emit(
+                        f"    mov rcx, qword ptr {self._mem(48 + 8 * (i - 4))}")
                 self.emit("    call runtime_export_from_wide")
                 self.emit(f"    mov qword ptr [rbp{dst + 8}], rax")
             elif t == 'cstr':
@@ -1589,8 +1592,10 @@ class AsmGenerator:
         offd = self.alloc_temp(dest)
         label = self.get_string_label(name)
         self.emit(f"    lea rcx, [{label}]\n    call get_var")
-        self.emit(f"    mov rdx, qword ptr [rax]\n    mov qword ptr [rbp{offd}], rdx")
-        self.emit(f"    mov rdx, qword ptr [rax + 8]\n    mov qword ptr [rbp{offd + 8}], rdx")
+        self.emit(
+            f"    mov rdx, qword ptr [rax]\n    mov qword ptr [rbp{offd}], rdx")
+        self.emit(
+            f"    mov rdx, qword ptr [rax + 8]\n    mov qword ptr [rbp{offd + 8}], rdx")
 
     def gen_global_set(self, op):
         _, name, src = op

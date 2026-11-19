@@ -16,7 +16,6 @@ ECL (Easy Control Language) 解释器 / AOT 编译器 / 缓存工具
   python main.py                               # 交互式 REPL
   python main.py test.ecl                      # 解释执行（兼容旧用法）
   python main.py run test.ecl                  # 解释执行
-  python main.py compile test.ecl              # AOT 编译到 .asm
   python main.py compile test.ecl --target exe # AOT 编译到 .exe
   python main.py dump test.eclc                # 反汇编缓存为文本
   python main.py load test.eclc.txt -o x.eclc  # 从文本重建缓存（调试用）
@@ -29,9 +28,11 @@ import subprocess
 import sys
 
 import dl
+import repl
 from token_parse import split_token
 from ast_parse import Parser
-from class_and_vars import NULL, ImportStmt
+from class_and_vars import (NULL, ImportStmt, ExprStmt, Call, Variable,
+                            Assign, Swap, Binary, Program)
 from checker import Checker, CheckError
 from compiler import Compiler, CompileError
 from errors import EclException, LexerError, ParseError
@@ -302,6 +303,126 @@ def run_ecl(content, source_path=None, without_check=False,
         return None
 
     return interp
+
+
+# ============================================================
+# REPL：表达式回显包装
+# ============================================================
+
+def try_wrap_print(content):
+    """整段输入是一条表达式语句时，包装成 print(expr) 供 REPL 回显；
+    否则返回 None 按普通语句执行。"""
+    try:
+        program = Parser(split_token(content)).parse()
+    except Exception:
+        return None
+    body = getattr(program, 'body', None)
+    if not body or len(body) != 1:
+        return None
+    stmt = body[0]
+    if not isinstance(stmt, ExprStmt):
+        return None
+
+    expr = stmt.expr
+
+    # 1) 赋值/交换不回显（Assign/Swap 是 Expr，会被包进 ExprStmt）
+    if isinstance(expr, (Assign, Swap)):
+        return None
+
+    # 2) 顶层裸比较 '=' 不回显：a = 1 被包成 print(a = 1) 时，
+    #    调用参数解析会把 IDENTIFIER = 当成关键字参数导致报错。
+    #    同时给用户一个赋值语法提示。
+    if isinstance(expr, Binary) and expr.op == '=':
+        # '=' 就是相等比较:直接回显比较结果,不改写、无提示
+        call = Call(
+            Variable('print', line=expr.line, col=expr.col),
+            [expr],
+            [], line=expr.line, col=expr.col)
+        return Program([ExprStmt(call, line=expr.line, col=expr.col)])
+
+    # 3) 自带输出的调用不包装，避免双重输出
+    if isinstance(expr, Call):
+        callee = expr.func
+        if isinstance(callee, Variable) and callee.name in (
+                'print', 'write', 'eprint', 'input', 'exit'):
+            return None
+
+    return f"print({content.strip()})"
+
+
+# ============================================================
+# REPL：执行闭包（编译留在 main，交互在 ecl_repl）
+# ============================================================
+
+def make_repl_runner(args):
+    """构造注入给 ecl_repl 的执行闭包。
+
+    - 同一个 Interpreter 贯穿整个会话（globals 持续累积）
+    - 每条语句独立编译（不经缓存），错误以异常抛出由 REPL 呈现
+    - 表达式语句自动包装为 print(...) 回显
+    - 过滤指向会话中已定义全局名的"未定义变量"误报警告
+    """
+    interp = Interpreter(allow_dll=not getattr(args, 'no_dll', False))
+    without_check = getattr(args, 'without_check', False)
+    from vm import VM
+
+    # 本会话已定义的全局名（初始为空，随执行累积）
+    defined = set()
+
+    def _filter_warnings(warnings):
+        """滤掉指向会话中已定义全局名的'未定义变量'误报"""
+        out = []
+        for w in warnings:
+            if '未定义的变量' in w:
+                for name in defined:
+                    if f"'{name}'" in w:
+                        break
+                else:
+                    out.append(w)
+                continue
+            out.append(w)
+        return out
+
+    def run_fragment(source, source_path=None):
+        # 表达式自动回显:返回 None / 源码文本 / 现成 Program(AST)
+        wrapped = try_wrap_print(source)
+        if wrapped is None or isinstance(wrapped, Program):
+            src = source if wrapped is None else None
+            program = wrapped
+        else:
+            src = wrapped
+            program = None
+
+        if program is None:
+            tokens = split_token(src)           # LexerError 向上抛
+            program = Parser(tokens).parse()    # ParseError
+
+        if not without_check:
+            checker = Checker()
+            try:
+                warnings = checker.check(program)
+            except CheckError:
+                for w in checker.warnings:
+                    print(w, file=sys.stderr)
+                raise
+            for w in _filter_warnings(warnings):
+                print(w, file=sys.stderr)
+
+        compiler = Compiler(aot_mode=False)
+        ir, exception_table = compiler.compile_program(program)
+        ir = Optimizer().optimize(ir)
+
+        vm = VM(ir, exception_table, interp.globals, interp)
+        vm.run()
+        defined.update(interp.globals.keys())
+        return interp
+
+    return run_fragment
+
+
+def run_repl(args):
+    """启动 REPL：编译职责留在 main，交互职责交给 ecl_repl。"""
+    repl.main(run_fragment=make_repl_runner(args))
 
 
 # ============================================================
@@ -632,116 +753,6 @@ def compile_aot(content, source_path, args, remove_output=None):
         if removed and getattr(args, 'verbose', False):
             for path in removed:
                 print(f"已删除中间文件: {path}", file=sys.stderr)
-
-
-# ============================================================
-# REPL
-# ============================================================
-
-def _format_repl_value(v):
-    if v is NULL:
-        return "null"
-    if v is None:
-        return "none"
-    if isinstance(v, bool):
-        return "True" if v else "False"
-    return str(v)
-
-
-def run_repl(args):
-    interp = Interpreter(allow_dll=not getattr(args, 'no_dll', False))
-    print("ECL 交互式解释器（输入 exit 或 Ctrl-D 退出；空行执行块）")
-    buffer = []
-
-    def repl_exec(src):
-        tokens = split_token(src)
-        p = Parser(tokens)
-        program = p.parse()
-        if not args.without_check:
-            warnings = Checker().check(program)
-            for w in warnings:
-                print(w, file=sys.stderr)
-        compiler = Compiler(aot_mode=False)
-        ir, exception_table = compiler.compile_program(program)
-        optimizer = Optimizer()
-        ir = optimizer.optimize(ir)
-        # REPL 复用同一个 Interpreter，globals 持续累积
-        from vm import VM
-        vm = VM(ir, exception_table, interp.globals, interp)
-        vm.run()
-
-    def block_depth(buf):
-        depth = 0
-        for b in buf:
-            s = b.strip()
-            if not s or s.startswith('#'):
-                continue
-            first = s.split()[0] if s.split() else ''
-            if first in ('def', 'if', 'for', 'while', 'class',
-                         'try', 'with', 'match', 'using'):
-                depth += 1
-            elif first == 'end':
-                depth -= 1
-        return depth
-
-    BLOCK_KEYWORDS = ('def', 'if', 'for', 'while', 'class',
-                      'try', 'with', 'match', 'using', 'end',
-                      'else', 'elif', 'except', 'finally', 'case')
-
-    while True:
-        prompt = ">>> " if not buffer else "... "
-        try:
-            line = input(prompt)
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        stripped = line.strip()
-
-        if not buffer and stripped in ('exit', 'quit', 'exit()', 'quit()'):
-            break
-
-        if not stripped:
-            if buffer:
-                d = block_depth(buffer)
-                if d > 0:
-                    buffer.extend(['end'] * d)
-                try:
-                    repl_exec("\n".join(buffer))
-                except LexerError as e:
-                    print(f"词法错误: {e}", file=sys.stderr)
-                except ParseError as e:
-                    print(f"语法错误: {e}", file=sys.stderr)
-                except CheckError as e:
-                    print(f"静态检查错误: {e}", file=sys.stderr)
-                except EclException as e:
-                    print(f"运行时错误: {e}", file=sys.stderr)
-                except Exception as e:
-                    print(f"内部错误: {type(e).__name__}: {e}",
-                          file=sys.stderr)
-                buffer.clear()
-            continue
-
-        buffer.append(line)
-
-        # 单行非块语句直接执行
-        if len(buffer) == 1 and not stripped.endswith(':'):
-            first = stripped.split()[0] if stripped.split() else ''
-            if first not in BLOCK_KEYWORDS:
-                try:
-                    repl_exec(stripped)
-                except LexerError as e:
-                    print(f"词法错误: {e}", file=sys.stderr)
-                except ParseError as e:
-                    print(f"语法错误: {e}", file=sys.stderr)
-                except CheckError as e:
-                    print(f"静态检查错误: {e}", file=sys.stderr)
-                except EclException as e:
-                    print(f"运行时错误: {e}", file=sys.stderr)
-                except Exception as e:
-                    print(f"内部错误: {type(e).__name__}: {e}",
-                          file=sys.stderr)
-                buffer.clear()
-                continue
 
 
 # ============================================================

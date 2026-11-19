@@ -2,7 +2,7 @@
   "name": "ecl-language",
   "displayName": "ECL Language",
   "description": "ECL 自研语言支持：高亮、诊断、悬停、补全、跳转、运行",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "engines": {
     "vscode": "^1.80.0"
   },

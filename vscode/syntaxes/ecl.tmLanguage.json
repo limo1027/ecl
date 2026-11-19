@@ -9,12 +9,16 @@
     { "include": "#external-lang" },
     { "include": "#code-literals" },
     { "include": "#strings" },
+    { "include": "#def-name" },
+    { "include": "#class-name" },
+    { "include": "#typed-decl" },
     { "include": "#types" },
     { "include": "#keywords" },
     { "include": "#builtin-funcs" },
     { "include": "#numbers" },
     { "include": "#operators" },
     { "include": "#functions" },
+    { "include": "#class-ref" },
     { "include": "#labels" },
     { "include": "#variables" }
   ],
@@ -84,14 +88,36 @@
     "interpolation": {
       "patterns": [
         {
-          "name": "meta.interpolation.expression.ecl",
-          "match": "(?<!\\$)\\$\\{[^}]*\\}"
+          "name": "variable.other.ecl",
+          "match": "(?<!\\$)\\$[A-Za-z_]\\w*"
         },
         {
-          "name": "meta.interpolation.variable.ecl",
-          "match": "(?<!\\$)\\$[A-Za-z_]\\w*"
+          "name": "variable.other.ecl",
+          "begin": "(?<!\\$)\\$\\{",
+          "end": "\\}",
+          "patterns": [
+            { "include": "source.ecl" }
+          ]
         }
       ]
+    },
+    "def-name": {
+      "match": "\\b(def)\\s+([A-Za-z_]\\w*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.ecl" },
+        "2": { "name": "entity.name.function.ecl" }
+      }
+    },
+    "class-name": {
+      "match": "\\b(class)\\s+([A-Za-z_]\\w*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.ecl" },
+        "2": { "name": "support.class.ecl" }
+      }
+    },
+    "typed-decl": {
+      "name": "support.type.ecl",
+      "match": "\\b[A-Za-z_]\\w*(?=\\s+[A-Za-z_]\\w*\\s*<-(?!>))"
     },
     "types": {
       "name": "support.type.ecl",
@@ -146,8 +172,12 @@
       "match": "<->|<-|\\.\\.=|\\.\\.|\\*\\*|//|==|!=|<=|>=|\\+=|-=|\\*=|/=|%=|&&|\\|\\||[+\\-*/%<>=!&|^~]"
     },
     "functions": {
-      "name": "entity.name.function.ecl",
-      "match": "\\b([A-Za-z_]\\w*)(?=\\s*\\()"
+      "name": "support.function.ecl",
+      "match": "\\b([a-z_]\\w*)(?=\\s*\\()"
+    },
+    "class-ref": {
+      "name": "support.class.ecl",
+      "match": "\\b[A-Z]\\w*\\b"
     },
     "labels": {
       "name": "entity.name.tag.ecl",

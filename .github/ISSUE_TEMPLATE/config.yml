@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用疑问 / 语法咨询
+    url: https://github.com/YOUR_USERNAME/ecl/discussions
+    about: 不确定是 bug 还是用法问题？先到这里讨论
+  - name: 语法文档
+    url: https://github.com/YOUR_USERNAME/ecl/blob/main/语法库.txt
+    about: 完整语法参考，提问前请先查阅

@@ -1,0 +1,206 @@
+ECL — Easy Control Language
+╔════════════════════════════════════════════╗
+║                                            ║
+║              ECL 0.1.0                     ║
+║        Easy Control Language               ║
+║        简单, 兼容, 极致                     ║
+║                                            ║
+╚════════════════════════════════════════════╝
+解释执行 + AOT 编译到无 CRT 原生 exe/dll 的一门动态语言
+简介
+ECL 是一门类 Python 语法的动态语言，具有以下特点：
+双模式执行：同一套 IR，既能由 VM 解释执行，也能 AOT 编译为 Windows x64
+汇编，链接成独立无 CRT 的 .exe / .dll
+与原生世界互操作：dll_import 直接调用 Win32/任意 DLL；--target dll 把
+ECL 编译成 DLL 供 C 宿主调用
+动态类型 + 类型注解：a <- 7 自动推断，int x <- 9 显式声明，静态检查器
+提供类型校验与警告
+现代语言特性：闭包、函数重载、多继承、match-case、with 上下文管理、
+using 成员引入、异常处理、结构体
+三态空值语义：none（显式空值）、null（空指针）、unknown（未定义变量
+的值）严格区分
+编译缓存：.eclc 二进制缓存，源码/依赖变更自动重编，支持文本 dump/load
+调试
+快速开始
+运行方式
+# 用 Python 运行
+python ecl.py                # 交互式 REPL
+python ecl.py run test.ecl   # 解释执行
+# 打包成 exe 后
+main.exe                     # REPL
+main.exe run test.ecl        # 解释执行
+第一个程序
+# hello.ecl
+def greet(name) -> str:
+    return "Hello, ${name}!"
+end
+print(greet("ECL"))
+int n <- 10
+total <- 0
+for i in 1..=n:
+    total <- total + i
+end
+print("sum =", total)
+AOT 编译
+python ecl.py compile hello.ecl --target exe   # 独立 exe（无 CRT）
+python ecl.py compile lib.ecl --target dll     # 动态库，宿主可直接调用
+python ecl.py compile hello.ecl --target asm   # 只生成汇编
+工具链
+命令	说明	
+run test.ecl	解释执行（也支持直接跑 .eclc 缓存）	
+compile test.ecl	AOT 编译，--target 选择 asm / exe / dll	
+dump test.eclc	反汇编缓存为文本（--flat 拍平嵌套函数）	
+load x.eclc.txt -o x.eclc	从文本重建缓存（调试用）	
+常用编译选项：
+--without-check   跳过静态检查
+--no-cache / --used-cache  控制缓存行为
+--remove-output   编译成功后清理中间文件
+--no-dll          禁用 dll_import（安全沙箱）
+--msvc-bin        指定 MSVC 工具链目录（默认自动探测）
+语言速览
+完整语法见 语法库.txt。
+变量与类型
+a <- 7                      # 自动推断
+int x <- 9                  # 显式声明
+int a <- double b <- 9      # 链式声明，自动转换
+const MAX <- 999            # 常量，修改抛 ConstChangingError
+# 类型系统
+int      # 任意精度整数（超大值自动转 BigInt）
+i64/i32  # 固定位宽，溢出回绕
+float    # 64 位双精度
+double   # 128 位高精度（IEEE 754 binary128）
+str / wstr / cstr / ptr
+list / dict / tuple / range
+控制流
+for i in 1..10:     # 不含 10
+for i in 1..=10:    # 含 10
+for i in 1..10+2:   # 步长 2
+for 10:             # 循环 10 次
+match x:                    # 默认不 fallthrough
+case 1:  ...
+case int if x > 0:  ...     # 类型模式 + 守卫
+case 1, 2, 3:  ...          # 多值模式
+case _:  ...
+end
+# 声明 define const FALLTHROUGH 后所有 match 默认 fallthrough
+函数
+def f(int a, str *args, int key=1, **kw) -> int:
+    return a + key
+end
+g(x) -> int <- x * 2       # 单行函数，自动 return
+# 同名不同参自动重载
+def area(int r) -> float:  ...
+def area(int w, int h) -> int:  ...
+类与对象
+class Point:
+    def __init__(int x, int y) -> none:
+        self.x <- x
+        self.y <- y
+    end
+    def __str__() -> str:      # 魔术方法
+        return "(${self.x}, ${self.y})"
+    end
+end
+p <- Point(3, 4)
+print(p)                        # (3, 4)
+self 隐式存在，不占参数位置；支持多继承、using 基类成员引入、完整的魔术
+方法协议（add / eq / getitem / enter 等）。
+与原生代码互操作
+调用外部 DLL：
+struct POINT:
+    i32 x
+    i32 y
+end
+dll_import "user32.dll":
+    def GetCursorPos(ptr POINT point) -> int
+end
+pt <- POINT()
+GetCursorPos(pt)
+print(pt.x, pt.y)
+导出 DLL（--target dll）：
+public def add(int a, int b) -> int:
+    return a + b
+end
+C 宿主直接 LoadLibrary + GetProcAddress("add") 调用，参数/返回值按 C ABI
+映射：
+HMODULE h = LoadLibraryA("test.dll");
+int64_t (*add)(int64_t, int64_t) =
+    (int64_t (*)(int64_t, int64_t))GetProcAddress(h, "add");
+printf("%lld\n", add(1, 2));
+外部语言执行（@@ 语法糖）：
+import py
+code <- """
+def add(a, b):
+    return a + b
+"""
+ctx <- @@py_py(code)      # 脱糖为 py_py().__exec__(code)
+result <- ctx.run(3, 5)
+架构
+┌─────────────┐   ┌───────────┐   ┌──────────┐   ┌────────────┐
+│ token_parse │──>│ ast_parse │──>│ checker  │──>│  compiler  │
+│   词法分析   │   │  语法分析  │   │ 静态检查  │   │ AST → IR   │
+└─────────────┘   └───────────┘   └──────────┘   └─────┬──────┘
+                                                       │
+                                               ┌───────▼────────┐
+                                               │   optimizer    │
+                                               │ 常量折叠 + DCE │
+                                               └───────┬────────┘
+                                      ┌────────────────┴───────────────┐
+                              ┌───────▼───────┐              ┌─────────▼─────────┐
+                              │    vm.py      │              │      asm.py       │
+                              │  解释执行 IR  │              │ IR → MASM x64     │
+                              └───────┬───────┘              └─────────┬─────────┘
+                                      │                        uasm64 + lld-link
+                              ┌───────▼───────┐              ┌─────────▼─────────┐
+                              │interpreter.py │              │ runtime.c (无 CRT)│
+                              └───────────────┘              └───────────────────┘
+关键模块
+文件	职责	
+ecl.py	CLI 入口：REPL / run / compile / dump / load	
+token_parse.py	词法分析：插值字符串、代码字符串、进制字面量	
+ast_parse.py	递归下降语法分析，生成 AST	
+checker.py	静态检查：作用域/类型/常量/重载/match 规则	
+compiler.py	AST → 三地址码 IR，含 AOT 专属降级	
+optimizer.py	常量折叠、死代码消除	
+vm.py	字节码虚拟机：标签跳转、异常表、with 栈展开	
+interpreter.py	解释器：内置函数、运算、属性、调用分发	
+asm.py	IR → MASM 汇编（Windows x64 ABI，无 CRT）	
+runtime.c	无 CRT 运行时：值系统、BigInt、字典、异常、DLL 调用	
+setjmp.asm	setjmp/longjmp + ecl_invoke 动态 DLL 调用	
+dl.py	.eclc 二进制/文本缓存序列化，SHA-256 校验	
+dll_support.py	解释器侧 ctypes DLL 支持、struct 布局	
+struct_layout.py	struct 编译期布局计算（C 对齐规则）	
+class_and_vars.py	AST 节点定义 + I64/I32/NULL/UNKNOWN 等核心值类型	
+编译缓存（.eclc）
+缓存文件格式：magic(ECLC) + IR 版本 + aot 标志 + 源码 SHA-256 + IR + 异常表。
+失效策略：
+源码内容 hash 不匹配 → 重编
+源文件或被 import 的模块文件 mtime 比缓存新 → 重编
+缓存损坏 / 版本不匹配 → 重编
+调试工作流：
+ecl dump test.run.eclc -o ir.txt        # 导出 IR 文本
+# 手动编辑 ir.txt
+ecl load ir.txt -o test.run.eclc        # 重建缓存后 run
+AOT 工具链要求
+目标	需要	
+--target asm	无（纯文本输出）	
+exe / dll	汇编器（uasm64.exe 或 MSVC ml64.exe）+ 链接器（lld-link.exe 或	
+	MSVC link.exe）+ 编译器（clang-cl.exe 或 cl.exe，编译 runtime.c）	
+工具按优先级自动探测：项目目录下的本地工具 → vswhere 定位的 MSVC → PATH。
+运行时只依赖 kernel32.dll，无 CRT、无 .NET、无其他运行库。
+设计亮点
+三态空值：none 可作右值/返回值；null 表示未初始化/已释放（使用报错）；
+unknown 是未定义变量的值（参与运算报错，检查器给警告）——把"空"的三种
+含义严格分开
+值语义 + COW：a <- b 深拷贝；容器带共享计数，写时复制
+AOT 与解释器行为对齐：闭包变量提升为全局槽、code() 静态编译成隐藏函数、
+DLL 导出首次调用时执行模块初始化
+浮点最短 round-trip 输出：dtoa 依次尝试 1..17 位有效数字，double_bits
+比对回环结果；找不到时加载 ucrtbase 的 _gcvt/strtod，再不行退化到自写
+fallback
+struct 双实现：编译期 Python 布局计算（struct_layout.py）与运行时 C 布局
+解析（runtime.c 的 DllLayout），两边遵循同一套 C 对齐规则
+DLL 调用细节正确：浮点参数走 xmm 寄存器（ecl_invoke 的 types 位标记）、
+浮点返回值从 ecl_xmm0_result 读、结构体按尺寸决定走寄存器还是指针
+许可
+见项目 LICENSE 文件。

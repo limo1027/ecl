@@ -494,8 +494,10 @@ typedef struct EclStruct {
 
 static void print_value_inner(Value* v, int quote_str);
 static void write_str(const char* s, int64_t len);
+static void builtin_list_pop(Value* result, Value** args, int argc);
 void runtime_raise_error(const char* msg);
 void runtime_convert(Value* out, Value* v, const char* type);
+void runtime_list_pop(Value* result, Value* list_val);
 void runtime_len(Value* result, Value* v);
 void runtime_new_buffer(Value* result, Value* size);
 void runtime_buffer_address(Value* result, Value* buf);
@@ -1132,24 +1134,46 @@ void runtime_write(Value* v) { print_value_inner(v, 0); }
 void runtime_write_space(void) { write_str(" ", 1); }
 
 int64_t runtime_truthy(Value* v) {
+    v = deref_ptr(v);
     switch (v->tag) {
-        case VAL_INT: return v->i != 0;
-        case VAL_I64: case VAL_I32: return v->i != 0;
-        case VAL_BOOL: return v->i != 0;
-        case VAL_FLOAT: return v->f != 0.0;
-        case VAL_DOUBLE: return v->f != 0.0;
-        case VAL_STR: return v->s && v->s[0] != '\0';
-        case VAL_BUFFER: return ((EclBuffer*)v->ptr)->size != 0;
-        case VAL_STRUCT: return 1;
-        case VAL_WSTR: return v->ptr && ((wchar_t*)v->ptr)[0] != 0;
-        case VAL_NULL: return 0; case VAL_NONE: return 0; case VAL_UNKNOWN: return 0;
-        case VAL_LIST: return ((EclList*)v->ptr)->len != 0;
-        case VAL_TUPLE: return ((EclList*)v->ptr)->len != 0;
-        case VAL_DICT: return ((EclDict*)v->ptr)->size != 0;
-        case VAL_BIGINT: return ((EclBigInt*)v->ptr)->len != 0;
-        default: return 1;
+        case VAL_INT:
+            return v->i != 0;
+        case VAL_I64:
+        case VAL_I32:
+            return v->i != 0;
+        case VAL_BOOL:
+            return v->i != 0;
+        case VAL_FLOAT:
+            return v->f != 0.0;
+        case VAL_DOUBLE:
+            return v->f != 0.0;
+        case VAL_STR:
+            return v->s && v->s[0] != '\0';
+        case VAL_BUFFER:
+            return ((EclBuffer*)v->ptr)->size != 0;
+        case VAL_STRUCT:
+            return 1;
+        case VAL_WSTR:
+            return v->ptr && ((wchar_t*)v->ptr)[0] != 0;
+        case VAL_NULL:
+            return 0;
+        case VAL_NONE:
+            return 0;
+        case VAL_UNKNOWN:
+            return 0;
+        case VAL_LIST:
+            return ((EclList*)v->ptr)->len != 0;
+        case VAL_TUPLE:
+            return ((EclList*)v->ptr)->len != 0;
+        case VAL_DICT:
+            return ((EclDict*)v->ptr)->size != 0;
+        case VAL_BIGINT:
+            return ((EclBigInt*)v->ptr)->len != 0;
+        default:
+            return 1;
     }
 }
+
 
 // ============================================================
 // BigInt 工具
@@ -1259,17 +1283,29 @@ void runtime_i32_unary(Value* result, Value* a) {
     }
 }
 
+
+
 void runtime_neg(Value* result, Value* a) {
+    a = deref_ptr(a);
     if (a->tag == VAL_UNKNOWN) {
         runtime_raise_error("TypeError: unknown 不能参与运算");
     }
     switch (a->tag) {
-        case VAL_INT: case VAL_I64: case VAL_I32: case VAL_BOOL:
-            result->tag = VAL_INT; result->i = -a->i; return;
+        case VAL_INT:
+        case VAL_I64:
+        case VAL_I32:
+        case VAL_BOOL:
+            result->tag = VAL_INT;
+            result->i = -a->i;
+            return;
         case VAL_FLOAT:
-            result->tag = VAL_FLOAT; result->f = -a->f; return;
+            result->tag = VAL_FLOAT;
+            result->f = -a->f;
+            return;
         case VAL_DOUBLE:
-            result->tag = VAL_DOUBLE; result->f = -a->f; return;
+            result->tag = VAL_DOUBLE;
+            result->f = -a->f;
+            return;
         case VAL_BIGINT: {
             EclBigInt* src = (EclBigInt*)a->ptr;
             EclBigInt* b = (EclBigInt*)no_crt_alloc(sizeof(EclBigInt));
@@ -1278,73 +1314,102 @@ void runtime_neg(Value* result, Value* a) {
             for (size_t i = 0; i < src->len; i++) b->limbs[i] = src->limbs[i];
             b->len = src->len;
             b->sign = -src->sign;
-            result->tag = VAL_BIGINT; result->ptr = b;
+            result->tag = VAL_BIGINT;
+            result->ptr = b;
             return;
         }
         default:
-            result->tag = VAL_NONE; result->i = 0;
+            result->tag = VAL_NONE;
+            result->i = 0;
     }
 }
 
 void runtime_invert(Value* result, Value* a) {
+    a = deref_ptr(a);
     if (a->tag == VAL_UNKNOWN) {
         runtime_raise_error("TypeError: unknown 不能参与运算");
     }
     if (a->tag == VAL_INT || a->tag == VAL_I64 || a->tag == VAL_I32 || a->tag == VAL_BOOL) {
-        result->tag = VAL_INT; result->i = ~a->i;
+        result->tag = VAL_INT;
+        result->i = ~a->i;
     } else {
-        result->tag = VAL_NONE; result->i = 0;
+        result->tag = VAL_NONE;
+        result->i = 0;
     }
 }
 
 void runtime_add(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     int dbl = (a->tag == VAL_DOUBLE || b->tag == VAL_DOUBLE);
     int is32 = (a->tag == VAL_I32 || b->tag == VAL_I32);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         result->tag = dbl ? VAL_DOUBLE : VAL_FLOAT;
         result->f = val_double(a) + val_double(b);
         return;
     }
     if (a->tag == VAL_INT && b->tag == VAL_INT) {
-        result->tag = VAL_INT; result->i = a->i + b->i; i32_finish(result, is32); return;
+        result->tag = VAL_INT;
+        result->i = a->i + b->i;
+        i32_finish(result, is32);
+        return;
     }
     if (a->tag == VAL_STR && b->tag == VAL_STR) {
         int64_t la = my_strlen(a->s), lb = my_strlen(b->s);
         char* s = (char*)no_crt_alloc(la + lb + 1);
-        if (!s) { result->tag = VAL_NONE; result->i = 0; return; }
-        memcpy(s, a->s, la);
-        memcpy(s + la, b->s, lb);
+        if (!s) {
+            result->tag = VAL_NONE;
+            result->i = 0;
+            return;
+        }
+        memcpy(s, a->s, (uint64_t)la);
+        memcpy(s + la, b->s, (uint64_t)lb);
         s[la + lb] = '\0';
-        result->tag = VAL_STR; result->s = s;
+        result->tag = VAL_STR;
+        result->s = s;
         return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* bx = make_big_from_val(a);
         EclBigInt* by = make_big_from_val(b);
         EclBigInt* br = (EclBigInt*)no_crt_alloc(sizeof(EclBigInt));
-        bi_init(br); bi_add(br, bx, by);
-        result->tag = VAL_BIGINT; result->ptr = br;
+        bi_init(br);
+        bi_add(br, bx, by);
+        result->tag = VAL_BIGINT;
+        result->ptr = br;
         return;
     }
-    result->tag = VAL_NONE; result->i = 0;
+    result->tag = VAL_NONE;
+    result->i = 0;
 }
 
 void runtime_sub(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     int dbl = (a->tag == VAL_DOUBLE || b->tag == VAL_DOUBLE);
     int is32 = (a->tag == VAL_I32 || b->tag == VAL_I32);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         result->tag = dbl ? VAL_DOUBLE : VAL_FLOAT;
         result->f = val_double(a) - val_double(b);
         return;
     }
     if (a->tag == VAL_INT && b->tag == VAL_INT) {
-        result->tag = VAL_INT; result->i = a->i - b->i; i32_finish(result, is32); return;
+        result->tag = VAL_INT;
+        result->i = a->i - b->i;
+        i32_finish(result, is32);
+        return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* bx = make_big_from_val(a);
@@ -1353,77 +1418,116 @@ void runtime_sub(Value* result, Value* a, Value* b) {
         bi_init(br);
         by->sign = -by->sign;
         bi_add(br, bx, by);
-        result->tag = VAL_BIGINT; result->ptr = br;
+        result->tag = VAL_BIGINT;
+        result->ptr = br;
         return;
     }
-    result->tag = VAL_NONE; result->i = 0;
+    result->tag = VAL_NONE;
+    result->i = 0;
 }
 
 void runtime_mul(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     int dbl = (a->tag == VAL_DOUBLE || b->tag == VAL_DOUBLE);
     int is32 = (a->tag == VAL_I32 || b->tag == VAL_I32);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         result->tag = dbl ? VAL_DOUBLE : VAL_FLOAT;
         result->f = val_double(a) * val_double(b);
         return;
     }
     if (a->tag == VAL_INT && b->tag == VAL_INT) {
-        result->tag = VAL_INT; result->i = a->i * b->i; i32_finish(result, is32); return;
+        result->tag = VAL_INT;
+        result->i = a->i * b->i;
+        i32_finish(result, is32);
+        return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* bx = make_big_from_val(a);
         EclBigInt* by = make_big_from_val(b);
         EclBigInt* br = (EclBigInt*)no_crt_alloc(sizeof(EclBigInt));
-        bi_init(br); bi_mul(br, bx, by);
-        result->tag = VAL_BIGINT; result->ptr = br;
+        bi_init(br);
+        bi_mul(br, bx, by);
+        result->tag = VAL_BIGINT;
+        result->ptr = br;
         return;
     }
-    result->tag = VAL_NONE; result->i = 0;
+    result->tag = VAL_NONE;
+    result->i = 0;
 }
 
 void runtime_div(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     int dbl = (a->tag == VAL_DOUBLE || b->tag == VAL_DOUBLE);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
-    if (b->tag == VAL_INT && b->i == 0) { runtime_raise_error("ZeroDivisionError"); }
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
+    if (b->tag == VAL_INT && b->i == 0) {
+        runtime_raise_error("ZeroDivisionError");
+    }
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double bf = val_double(b);
-        if (bf == 0.0) { runtime_raise_error("ZeroDivisionError"); }
+        if (bf == 0.0) {
+            runtime_raise_error("ZeroDivisionError");
+        }
         result->tag = dbl ? VAL_DOUBLE : VAL_FLOAT;
         result->f = val_double(a) / bf;
         return;
     }
     if (a->tag == VAL_INT && b->tag == VAL_INT) {
-        result->tag = VAL_FLOAT; result->f = (double)a->i / (double)b->i; return;
+        result->tag = VAL_FLOAT;
+        result->f = (double)a->i / (double)b->i;
+        return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         double bf = val_double(b);
-        if (bf == 0.0) { runtime_raise_error("ZeroDivisionError"); }
+        if (bf == 0.0) {
+            runtime_raise_error("ZeroDivisionError");
+        }
         result->tag = VAL_FLOAT;
         result->f = val_double(a) / bf;
         return;
     }
-    result->tag = VAL_NONE; result->i = 0;
+    result->tag = VAL_NONE;
+    result->i = 0;
 }
 
 void runtime_floordiv(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     int dbl = (a->tag == VAL_DOUBLE || b->tag == VAL_DOUBLE);
     int is32 = (a->tag == VAL_I32 || b->tag == VAL_I32);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
-    if (b->tag == VAL_INT && b->i == 0) { runtime_raise_error("ZeroDivisionError"); }
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
+    if (b->tag == VAL_INT && b->i == 0) {
+        runtime_raise_error("ZeroDivisionError");
+    }
     if (a->tag == VAL_INT && b->tag == VAL_INT) {
-        result->tag = VAL_INT; result->i = a->i / b->i; i32_finish(result, is32); return;
+        result->tag = VAL_INT;
+        result->i = a->i / b->i;
+        i32_finish(result, is32);
+        return;
     }
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double af = val_double(a);
         double bf = val_double(b);
-        if (bf == 0.0) { runtime_raise_error("ZeroDivisionError"); }
+        if (bf == 0.0) {
+            runtime_raise_error("ZeroDivisionError");
+        }
         double q = af / bf;
         int64_t iq = (int64_t)q;
         if ((double)iq > q) iq--;
@@ -1432,25 +1536,39 @@ void runtime_floordiv(Value* result, Value* a, Value* b) {
         return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
-        runtime_raise_error("NotImplementedError"); return;
+        runtime_raise_error("NotImplementedError");
+        return;
     }
-    result->tag = VAL_NONE; result->i = 0;
+    result->tag = VAL_NONE;
+    result->i = 0;
 }
 
 void runtime_mod(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     int dbl = (a->tag == VAL_DOUBLE || b->tag == VAL_DOUBLE);
     int is32 = (a->tag == VAL_I32 || b->tag == VAL_I32);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
-    if (b->tag == VAL_INT && b->i == 0) { runtime_raise_error("ZeroDivisionError"); }
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
+    if (b->tag == VAL_INT && b->i == 0) {
+        runtime_raise_error("ZeroDivisionError");
+    }
     if (a->tag == VAL_INT && b->tag == VAL_INT) {
-        result->tag = VAL_INT; result->i = a->i % b->i; i32_finish(result, is32); return;
+        result->tag = VAL_INT;
+        result->i = a->i % b->i;
+        i32_finish(result, is32);
+        return;
     }
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double af = val_double(a);
         double bf = val_double(b);
-        if (bf == 0.0) { runtime_raise_error("ZeroDivisionError"); }
+        if (bf == 0.0) {
+            runtime_raise_error("ZeroDivisionError");
+        }
         double q = af / bf;
         int64_t iq = (int64_t)q;
         if ((double)iq > q) iq--;
@@ -1459,17 +1577,24 @@ void runtime_mod(Value* result, Value* a, Value* b) {
         return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
-        runtime_raise_error("NotImplementedError"); return;
+        runtime_raise_error("NotImplementedError");
+        return;
     }
-    result->tag = VAL_NONE; result->i = 0;
+    result->tag = VAL_NONE;
+    result->i = 0;
 }
 
 void runtime_pow(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     int dbl = (a->tag == VAL_DOUBLE || b->tag == VAL_DOUBLE);
     int is32 = (a->tag == VAL_I32 || b->tag == VAL_I32);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double base = val_double(a);
         double exp = val_double(b);
@@ -1493,21 +1618,33 @@ void runtime_pow(Value* result, Value* a, Value* b) {
     }
     if (a->tag == VAL_INT && b->tag == VAL_INT) {
         int64_t base = a->i, exp = b->i;
-        if (exp < 0) { result->tag = VAL_FLOAT; result->f = 1.0; return; }
+        if (exp < 0) {
+            result->tag = VAL_FLOAT;
+            result->f = 1.0;
+            return;
+        }
         int64_t r = 1;
         while (exp > 0) {
             if (exp & 1) r *= base;
             base *= base;
             exp >>= 1;
         }
-        result->tag = VAL_INT; result->i = r; i32_finish(result, is32);
+        result->tag = VAL_INT;
+        result->i = r;
+        i32_finish(result, is32);
         return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* bi_base = make_big_from_val(a);
         EclBigInt* bi_exp = make_big_from_val(b);
-        if (bi_exp->sign <= 0) { result->tag = VAL_FLOAT; result->f = 1.0; return; }
-        if (bi_exp->len > 2) { runtime_raise_error("OverflowError"); }
+        if (bi_exp->sign <= 0) {
+            result->tag = VAL_FLOAT;
+            result->f = 1.0;
+            return;
+        }
+        if (bi_exp->len > 2) {
+            runtime_raise_error("OverflowError");
+        }
         int64_t exp = bi_exp->limbs[0];
         if (bi_exp->len >= 2) exp |= ((int64_t)bi_exp->limbs[1] << LIMB_BITS);
         EclBigInt* bi_res = make_big_i64(1);
@@ -1530,58 +1667,92 @@ void runtime_pow(Value* result, Value* a, Value* b) {
         result->ptr = bi_res;
         return;
     }
-    result->tag = VAL_NONE; result->i = 0;
+    result->tag = VAL_NONE;
+    result->i = 0;
 }
+
 
 // ============================================================
 // 比较运算
 // ============================================================
 void runtime_eq(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     if (a->tag == VAL_UNKNOWN || b->tag == VAL_UNKNOWN) {
         result->tag = VAL_BOOL;
         result->i = (a->tag == VAL_UNKNOWN && b->tag == VAL_UNKNOWN);
         return;
     }
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv);
-    a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     int eq = 0;
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* x = make_big_from_val(a);
         EclBigInt* y = make_big_from_val(b);
         eq = (x->sign == y->sign) && cmp_mag(x->limbs, x->len, y->limbs, y->len) == 0;
-        result->tag = VAL_BOOL; result->i = eq;
+        result->tag = VAL_BOOL;
+        result->i = eq;
         return;
     }
-    if (a->tag == VAL_INT && b->tag == VAL_INT) eq = a->i == b->i;
+    if (a->tag == VAL_INT && b->tag == VAL_INT) {
+        eq = a->i == b->i;
+    }
     else if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double af = (a->tag == VAL_FLOAT) ? a->f : (double)a->i;
         double bf = (b->tag == VAL_FLOAT) ? b->f : (double)b->i;
         eq = af == bf;
-    } else if (a->tag == b->tag) {
+    }
+    else if (a->tag == b->tag) {
         switch (a->tag) {
-            case VAL_STR: eq = my_strcmp(a->s, b->s) == 0; break;
-            case VAL_NULL: eq = 1; break; case VAL_NONE: eq = 1; break;
-            case VAL_INSTANCE: eq = a->ptr == b->ptr; break;
-            default: eq = 0;
+            case VAL_STR:
+                eq = my_strcmp(a->s, b->s) == 0;
+                break;
+            case VAL_NULL:
+                eq = 1;
+                break;
+            case VAL_NONE:
+                eq = 1;
+                break;
+            case VAL_INSTANCE:
+                eq = a->ptr == b->ptr;
+                break;
+            default:
+                eq = 0;
         }
     }
-    result->tag = VAL_BOOL; result->i = eq;
+    result->tag = VAL_BOOL;
+    result->i = eq;
 }
+
 void runtime_ne(Value* result, Value* a, Value* b) {
-    runtime_eq(result, a, b); result->i = !result->i;
+    a = deref_ptr(a);
+    b = deref_ptr(b);
+    runtime_eq(result, a, b);
+    result->i = !result->i;
 }
+
 void runtime_lt(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv);
-    a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     result->tag = VAL_BOOL;
-    if (a->tag == VAL_STR && b->tag == VAL_STR) { result->i = my_strcmp(a->s, b->s) < 0; return; }
+    if (a->tag == VAL_STR && b->tag == VAL_STR) {
+        result->i = my_strcmp(a->s, b->s) < 0;
+        return;
+    }
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double af = (a->tag == VAL_FLOAT) ? a->f : (double)a->i;
         double bf = (b->tag == VAL_FLOAT) ? b->f : (double)b->i;
-        result->i = af < bf; return;
+        result->i = af < bf;
+        return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* x = make_big_from_val(a);
@@ -1593,16 +1764,26 @@ void runtime_lt(Value* result, Value* a, Value* b) {
     }
     result->i = a->i < b->i;
 }
+
 void runtime_gt(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     result->tag = VAL_BOOL;
-    if (a->tag == VAL_STR && b->tag == VAL_STR) { result->i = my_strcmp(a->s, b->s) > 0; return; }
+    if (a->tag == VAL_STR && b->tag == VAL_STR) {
+        result->i = my_strcmp(a->s, b->s) > 0;
+        return;
+    }
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double af = (a->tag == VAL_FLOAT) ? a->f : (double)a->i;
         double bf = (b->tag == VAL_FLOAT) ? b->f : (double)b->i;
-        result->i = af > bf; return;
+        result->i = af > bf;
+        return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* x = make_big_from_val(a);
@@ -1614,16 +1795,26 @@ void runtime_gt(Value* result, Value* a, Value* b) {
     }
     result->i = a->i > b->i;
 }
+
 void runtime_le(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     result->tag = VAL_BOOL;
-    if (a->tag == VAL_STR && b->tag == VAL_STR) { result->i = my_strcmp(a->s, b->s) <= 0; return; }
+    if (a->tag == VAL_STR && b->tag == VAL_STR) {
+        result->i = my_strcmp(a->s, b->s) <= 0;
+        return;
+    }
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double af = (a->tag == VAL_FLOAT) ? a->f : (double)a->i;
         double bf = (b->tag == VAL_FLOAT) ? b->f : (double)b->i;
-        result->i = af <= bf; return;
+        result->i = af <= bf;
+        return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* x = make_big_from_val(a);
@@ -1635,16 +1826,26 @@ void runtime_le(Value* result, Value* a, Value* b) {
     }
     result->i = a->i <= b->i;
 }
+
 void runtime_ge(Value* result, Value* a, Value* b) {
+    a = deref_ptr(a);
+    b = deref_ptr(b);
     reject_unknown(a, b);
     Value av = *a, bv = *b;
-    NORMALIZE_VALUE(&av); NORMALIZE_VALUE(&bv); a = &av; b = &bv;
+    NORMALIZE_VALUE(&av);
+    NORMALIZE_VALUE(&bv);
+    a = &av;
+    b = &bv;
     result->tag = VAL_BOOL;
-    if (a->tag == VAL_STR && b->tag == VAL_STR) { result->i = my_strcmp(a->s, b->s) >= 0; return; }
+    if (a->tag == VAL_STR && b->tag == VAL_STR) {
+        result->i = my_strcmp(a->s, b->s) >= 0;
+        return;
+    }
     if (a->tag == VAL_FLOAT || b->tag == VAL_FLOAT) {
         double af = (a->tag == VAL_FLOAT) ? a->f : (double)a->i;
         double bf = (b->tag == VAL_FLOAT) ? b->f : (double)b->i;
-        result->i = af >= bf; return;
+        result->i = af >= bf;
+        return;
     }
     if (a->tag == VAL_BIGINT || b->tag == VAL_BIGINT) {
         EclBigInt* x = make_big_from_val(a);
@@ -1656,6 +1857,7 @@ void runtime_ge(Value* result, Value* a, Value* b) {
     }
     result->i = a->i >= b->i;
 }
+
 
 // ============================================================
 // 内置函数（VM 风格 builtin_call）
@@ -2531,65 +2733,152 @@ void runtime_get_attr(Value* out, Value* obj, const char* name) {
         runtime_struct_get_field(out, obj, name);
         return;
     }
+
     if (obj->tag == VAL_CODE) {
         if (my_strcmp(name, "run") == 0) {
             *out = make_bound_builtin(obj, (void*)runtime_code_run);
             return;
         }
-        out->tag = VAL_NONE; out->i = 0; return;
+        out->tag = VAL_NONE;
+        out->i = 0;
+        return;
     }
+
     if (obj->tag == VAL_EXCLASS) {
         out->tag = VAL_STR;
         out->s = (my_strcmp(name, "exc_type") == 0) ? obj->s : my_strdup("");
         return;
     }
+
     if (obj->tag == VAL_EXC) {
         EclExc* e = (EclExc*)obj->ptr;
         out->tag = VAL_STR;
-        if (my_strcmp(name, "message") == 0) out->s = e->msg;
-        else if (my_strcmp(name, "exc_type") == 0) out->s = e->type;
-        else out->s = my_strdup("");
+        if (my_strcmp(name, "message") == 0) {
+            out->s = e->msg;
+        }
+        else if (my_strcmp(name, "exc_type") == 0) {
+            out->s = e->type;
+        }
+        else {
+            out->s = my_strdup("");
+        }
         return;
     }
+
     if (obj->tag == VAL_BASEPROXY) {
         EclBaseProxy* p = (EclBaseProxy*)obj->ptr;
         EclAttr* a = find_attr(p->inst, name);
-        if (a) { *out = a->value; value_share(out); return; }
+        if (a) {
+            *out = a->value;
+            value_share(out);
+            return;
+        }
         EclMethod* m = find_method(p->base, name);
         if (m) {
             out->tag = VAL_BOUND;
             out->ptr = make_bound(p->inst, m);
             return;
         }
-        out->tag = VAL_NONE; out->i = 0; return;
+        out->tag = VAL_NONE;
+        out->i = 0;
+        return;
     }
+
     if (obj->tag == VAL_STR) {
-        if (my_strcmp(name, "upper") == 0) { *out = make_bound_builtin(obj, (void*)str_method_upper); return; }
-        if (my_strcmp(name, "lower") == 0) { *out = make_bound_builtin(obj, (void*)str_method_lower); return; }
-        if (my_strcmp(name, "strip") == 0) { *out = make_bound_builtin(obj, (void*)str_method_strip); return; }
-        if (my_strcmp(name, "split") == 0) { *out = make_bound_builtin(obj, (void*)str_method_split); return; }
-        if (my_strcmp(name, "join") == 0) { *out = make_bound_builtin(obj, (void*)str_method_join); return; }
-        if (my_strcmp(name, "find") == 0) { *out = make_bound_builtin(obj, (void*)str_method_find); return; }
-        if (my_strcmp(name, "replace") == 0) { *out = make_bound_builtin(obj, (void*)str_method_replace); return; }
-        if (my_strcmp(name, "format") == 0) { *out = make_bound_builtin(obj, (void*)str_method_format); return; }
-        out->tag = VAL_NONE; out->i = 0; return;
-    }
-    if (obj->tag == VAL_DICT) {
-        if (my_strcmp(name, "get") == 0) { *out = make_bound_builtin(obj, (void*)dict_method_get); return; }
-        if (my_strcmp(name, "has") == 0) { *out = make_bound_builtin(obj, (void*)dict_method_has); return; }
-        if (my_strcmp(name, "keys") == 0) { *out = make_bound_builtin(obj, (void*)dict_method_keys); return; }
-        if (my_strcmp(name, "values") == 0) { *out = make_bound_builtin(obj, (void*)dict_method_values); return; }
-        {
-            Value key; key.tag = VAL_STR; key.s = (char*)name;
-            EclDictEntry* e = dict_find((EclDict*)obj->ptr, key);
-            if (e) { *out = e->val; value_share(out); return; }
+        if (my_strcmp(name, "upper") == 0) {
+            *out = make_bound_builtin(obj, (void*)str_method_upper);
+            return;
         }
-        out->tag = VAL_NONE; out->i = 0; return;
+        if (my_strcmp(name, "lower") == 0) {
+            *out = make_bound_builtin(obj, (void*)str_method_lower);
+            return;
+        }
+        if (my_strcmp(name, "strip") == 0) {
+            *out = make_bound_builtin(obj, (void*)str_method_strip);
+            return;
+        }
+        if (my_strcmp(name, "split") == 0) {
+            *out = make_bound_builtin(obj, (void*)str_method_split);
+            return;
+        }
+        if (my_strcmp(name, "join") == 0) {
+            *out = make_bound_builtin(obj, (void*)str_method_join);
+            return;
+        }
+        if (my_strcmp(name, "find") == 0) {
+            *out = make_bound_builtin(obj, (void*)str_method_find);
+            return;
+        }
+        if (my_strcmp(name, "replace") == 0) {
+            *out = make_bound_builtin(obj, (void*)str_method_replace);
+            return;
+        }
+        if (my_strcmp(name, "format") == 0) {
+            *out = make_bound_builtin(obj, (void*)str_method_format);
+            return;
+        }
+        out->tag = VAL_NONE;
+        out->i = 0;
+        return;
     }
+
+    if (obj->tag == VAL_DICT) {
+        if (my_strcmp(name, "get") == 0) {
+            *out = make_bound_builtin(obj, (void*)dict_method_get);
+            return;
+        }
+        if (my_strcmp(name, "has") == 0) {
+            *out = make_bound_builtin(obj, (void*)dict_method_has);
+            return;
+        }
+        if (my_strcmp(name, "keys") == 0) {
+            *out = make_bound_builtin(obj, (void*)dict_method_keys);
+            return;
+        }
+        if (my_strcmp(name, "values") == 0) {
+            *out = make_bound_builtin(obj, (void*)dict_method_values);
+            return;
+        }
+        // dict 允许用属性语法访问键（仅当不是方法名时）
+        {
+            Value key;
+            key.tag = VAL_STR;
+            key.s = (char*)name;
+            EclDictEntry* e = dict_find((EclDict*)obj->ptr, key);
+            if (e) {
+                *out = e->val;
+                value_share(out);
+                return;
+            }
+        }
+        out->tag = VAL_NONE;
+        out->i = 0;
+        return;
+    }
+
+    if (obj->tag == VAL_LIST) {
+        obj = deref_ptr(obj);
+        if (my_strcmp(name, "append") == 0) {
+            *out = make_bound_builtin(obj, (void*)builtin_list_append);
+            return;
+        }
+        if (my_strcmp(name, "pop") == 0) {
+            *out = make_bound_builtin(obj, (void*)builtin_list_pop);
+            return;
+        }
+        out->tag = VAL_NONE;
+        out->i = 0;
+        return;
+    }
+
     if (obj->tag == VAL_INSTANCE) {
         EclInstance* inst = (EclInstance*)obj->ptr;
         EclAttr* a = find_attr(inst, name);
-        if (a) { *out = a->value; value_share(out); return; }
+        if (a) {
+            *out = a->value;
+            value_share(out);
+            return;
+        }
         EclMethod* m = find_method(inst->cls, name);
         if (m) {
             out->tag = VAL_BOUND;
@@ -2597,36 +2886,38 @@ void runtime_get_attr(Value* out, Value* obj, const char* name) {
             value_share(obj);
             return;
         }
-        if (is_dunder(name)) { out->tag = VAL_NULL; out->i = 0; return; }
-        out->tag = VAL_NONE; out->i = 0; return;
+        if (is_dunder(name)) {
+            out->tag = VAL_NULL;
+            out->i = 0;
+            return;
+        }
+        out->tag = VAL_NONE;
+        out->i = 0;
+        return;
     }
+
     if (obj->tag == VAL_CLASS) {
         EclClass* cls = (EclClass*)obj->ptr;
         EclMethod* m = find_method(cls, name);
-        if (m) { out->tag = VAL_FUNCTION; out->ptr = m->code; return; }
-        if (is_dunder(name)) { out->tag = VAL_NULL; out->i = 0; return; }
-        out->tag = VAL_NONE; out->i = 0; return;
-    }
-    if (obj->tag == VAL_LIST) {
-        if (my_strcmp(name, "append") == 0) {
-            EclBoundMethod* bm = (EclBoundMethod*)no_crt_alloc(sizeof(EclBoundMethod));
-            bm->self = 0; bm->m = 0;
-            bm->builtin = (void*)builtin_list_append;
-            bm->self_val = *obj;
-            value_share(&bm->self_val);
-            out->tag = VAL_BOUND;
-            out->ptr = bm;
+        if (m) {
+            out->tag = VAL_FUNCTION;
+            out->ptr = m->code;
             return;
         }
-    }
-    if (obj->tag == VAL_CODE) {
-        if (my_strcmp(name, "run") == 0) {
-            runtime_raise_error("NotImplementedError: code 对象在 AOT 模式下不支持");
+        if (is_dunder(name)) {
+            out->tag = VAL_NULL;
+            out->i = 0;
+            return;
         }
-        out->tag = VAL_NONE; out->i = 0; return;
+        out->tag = VAL_NONE;
+        out->i = 0;
+        return;
     }
-    out->tag = VAL_NONE; out->i = 0;
+
+    out->tag = VAL_NONE;
+    out->i = 0;
 }
+
 void runtime_set_attr(Value* obj, const char* name, Value* v) {
     if (obj->tag == VAL_STRUCT) {
         runtime_struct_set_field(obj, name, v);
@@ -2658,25 +2949,104 @@ void runtime_list_append(Value* list_val, Value* item) {
     if (list_val->tag != VAL_LIST) return;
     list_push_raw((EclList*)list_val->ptr, *item);
 }
+// ============================================================
+// runtime_list_pop —— 调试版本
+// list.pop() 的运行时实现，带详细诊断输出：
+//   [pop-debug] tag=<n>  (收到的参数类型)
+//   [pop-debug] bound 解包: self_val tag=<n>
+//   [pop-debug] list len=<n>
+//   [pop-debug] 弹出元素 tag=<n>
+// 调试通过后可删掉所有 [pop-debug] 输出。
+// ============================================================
+// ============================================================
+// 内部实现：list_val 已经确定是真正的 list Value
+// ============================================================
+// ============================================================
+// 内部实现：list_val 已经确定是真正的 list Value
+// ============================================================
+static void list_pop_impl(Value* result, Value* list_val) {
+    result->tag = VAL_NONE;
+    result->i = 0;
+
+    list_val = deref_ptr(list_val);
+
+    if (list_val->tag != VAL_LIST) {
+        runtime_raise_error("TypeError: pop 只能用于 list");
+        return;
+    }
+
+    EclList* l = (EclList*)list_val->ptr;
+    if (!l) {
+        runtime_raise_error("TypeError: pop 的 list 指针为空");
+        return;
+    }
+    if (l->len <= 0) {
+        runtime_raise_error("IndexError: pop from empty list");
+        return;
+    }
+
+    // COW 分离：list 被多个变量共享时先拷贝
+    if (l->shared > 1) {
+        list_cow(&l);
+        list_val->ptr = l;
+    }
+
+    // 弹出尾元素（无引用计数，Value 直接移交）
+    Value item = l->items[l->len - 1];
+    l->len--;   // 槽位留在原地，下次 append 直接覆盖
+
+    *result = item;
+}
+
+// ============================================================
+// bound 方法入口（EclFuncPtr 约定）：args[0] = self（list 本身）
+// ============================================================
+static void builtin_list_pop(Value* result, Value** args, int argc) {
+    if (argc < 1) {
+        runtime_raise_error("TypeError: pop 缺少参数");
+        return;
+    }
+    list_pop_impl(result, args[0]);
+}
+
+// 兼容旧调用：如果还有地方用 (result, list_val) 两参签名直接调
+void runtime_list_pop(Value* result, Value* list_val) {
+    list_pop_impl(result, list_val);
+}
+
+
 void runtime_new_dict(Value* out) { out->tag = VAL_DICT; out->ptr = dict_new(); }
 void runtime_dict_set(Value* dict_val, Value* key, Value* val) {
     if (dict_val->tag != VAL_DICT) return;
     dict_put_raw((EclDict*)dict_val->ptr, *key, *val);
 }
 void runtime_get_item(Value* out, Value* obj, Value* idx) {
+    obj = deref_ptr(obj);
+    idx = deref_ptr(idx);
+
     if (obj->tag == VAL_BUFFER && idx->tag == VAL_INT) {
         EclBuffer* b = (EclBuffer*)obj->ptr;
         int64_t i = idx->i;
         if (i < 0) i += b->size;
-        if (i < 0 || i >= b->size) { out->tag = VAL_NONE; out->i = 0; return; }
+        if (i < 0 || i >= b->size) {
+            out->tag = VAL_NONE;
+            out->i = 0;
+            return;
+        }
         out->tag = VAL_INT;
         out->i = b->data[i];
         return;
     }
+
     if ((obj->tag == VAL_LIST || obj->tag == VAL_TUPLE) && idx->tag == VAL_INT) {
-        EclList* l = (EclList*)obj->ptr; int64_t i = idx->i;
+        EclList* l = (EclList*)obj->ptr;
+        int64_t i = idx->i;
         if (i < 0) i += l->len;
-        if (i < 0 || i >= l->len) { out->tag = VAL_NONE; out->i = 0; return; }
+        if (i < 0 || i >= l->len) {
+            out->tag = VAL_NONE;
+            out->i = 0;
+            return;
+        }
         *out = l->items[i];
         value_share(out);
         return;
@@ -2685,13 +3055,24 @@ void runtime_get_item(Value* out, Value* obj, Value* idx) {
     if (obj->tag == VAL_DICT) {
         EclDict* d = (EclDict*)obj->ptr;
         EclDictEntry* e = dict_find(d, *idx);
-        if (e) { *out = e->val; value_share(out); return; }
-        out->tag = VAL_NONE; out->i = 0; return;
+        if (e) {
+            *out = e->val;
+            value_share(out);
+            return;
+        }
+        out->tag = VAL_NONE;
+        out->i = 0;
+        return;
     }
 
-    out->tag = VAL_NONE; out->i = 0;
+    out->tag = VAL_NONE;
+    out->i = 0;
 }
 void runtime_set_item(Value* obj, Value* idx, Value* val) {
+    obj = deref_ptr(obj);
+    idx = deref_ptr(idx);
+    val = deref_ptr(val);
+
     if (obj->tag == VAL_BUFFER && idx->tag == VAL_INT) {
         EclBuffer* b = (EclBuffer*)obj->ptr;
         int64_t i = idx->i;
@@ -2700,8 +3081,10 @@ void runtime_set_item(Value* obj, Value* idx, Value* val) {
         b->data[i] = (unsigned char)(dll_to_int(val) & 0xFF);
         return;
     }
+
     if (obj->tag == VAL_LIST && idx->tag == VAL_INT) {
-        EclList* l = (EclList*)obj->ptr; int64_t i = idx->i;
+        EclList* l = (EclList*)obj->ptr;
+        int64_t i = idx->i;
         if (i < 0) i += l->len;
         if (i < 0 || i >= l->len) return;
         value_release(&l->items[i]);
@@ -2709,10 +3092,12 @@ void runtime_set_item(Value* obj, Value* idx, Value* val) {
         value_share(val);
         return;
     }
+
     if (obj->tag == VAL_DICT) {
         dict_put_raw((EclDict*)obj->ptr, *idx, *val);
     }
 }
+
 
 // ============================================================
 // 内置函数
@@ -2808,14 +3193,7 @@ void runtime_str(Value* result, Value* v) {
     result->tag = VAL_STR;
     result->s = buf;
 }
-void runtime_len(Value* result, Value* v) {
-    result->tag = VAL_INT;
-    if (v->tag == VAL_STR) result->i = my_strlen(v->s);
-    else if (v->tag == VAL_LIST || v->tag == VAL_TUPLE) result->i = ((EclList*)v->ptr)->len;
-    else if (v->tag == VAL_DICT) result->i = ((EclDict*)v->ptr)->size;
-    else if (v->tag == VAL_BUFFER) result->i = ((EclBuffer*)v->ptr)->size;
-    else result->i = 0;
-}
+
 // 把字符串解析成任意精度整数：支持空白、正负号、0x/0o/0b 前缀和下划线。
 static int parse_int_bigint(const char* s, EclBigInt* out) {
     while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n' ||
@@ -2896,21 +3274,25 @@ static int64_t bigint_low_i64(const EclBigInt* b) {
 }
 
 void runtime_int(Value* result, Value* v) {
+    v = deref_ptr(v);
     if (v->tag == VAL_INT || v->tag == VAL_I64 || v->tag == VAL_I32 || v->tag == VAL_BOOL) {
         int64_t x = v->i;
         result->tag = VAL_INT;
         result->i = x;
-    } else if (v->tag == VAL_FLOAT || v->tag == VAL_DOUBLE) {
+    }
+    else if (v->tag == VAL_FLOAT || v->tag == VAL_DOUBLE) {
         int64_t x = (int64_t)v->f;
         result->tag = VAL_INT;
         result->i = x;
-    } else if (v->tag == VAL_BIGINT) {
+    }
+    else if (v->tag == VAL_BIGINT) {
         // int(BigInt) 保持任意精度；result == v 时无需处理
         if (result != v) {
             *result = *v;
             value_share(result);
         }
-    } else if (v->tag == VAL_STR) {
+    }
+    else if (v->tag == VAL_STR) {
         EclBigInt bi;
         if (!parse_int_bigint(v->s, &bi)) {
             result->tag = VAL_INT;
@@ -2923,20 +3305,22 @@ void runtime_int(Value* result, Value* v) {
             result->tag = VAL_INT;
             result->i = x;
             no_crt_free(bi.limbs);
-        } else {
+        }
+        else {
             EclBigInt* heap = (EclBigInt*)no_crt_alloc(sizeof(EclBigInt));
             *heap = bi;
             result->tag = VAL_BIGINT;
             result->ptr = heap;
         }
-    } else {
+    }
+    else {
         result->tag = VAL_INT;
         result->i = 0;
     }
 }
 
-// i64()/i32()/返回类型 i64：按 64 位补码回绕。
 void runtime_to_i64(Value* result, Value* v) {
+    v = deref_ptr(v);
     if (v->tag == VAL_BIGINT) {
         result->tag = VAL_I64;
         result->i = bigint_low_i64((EclBigInt*)v->ptr);
@@ -2966,9 +3350,14 @@ void runtime_to_i32(Value* result, Value* v) {
 }
 
 void runtime_float(Value* result, Value* v) {
+    v = deref_ptr(v);
     result->tag = VAL_FLOAT;
-    if (v->tag == VAL_FLOAT || v->tag == VAL_DOUBLE) result->f = v->f;
-    else if (v->tag == VAL_INT || v->tag == VAL_I64 || v->tag == VAL_I32 || v->tag == VAL_BOOL) result->f = (double)v->i;
+    if (v->tag == VAL_FLOAT || v->tag == VAL_DOUBLE) {
+        result->f = v->f;
+    }
+    else if (v->tag == VAL_INT || v->tag == VAL_I64 || v->tag == VAL_I32 || v->tag == VAL_BOOL) {
+        result->f = (double)v->i;
+    }
     else if (v->tag == VAL_BIGINT) {
         EclBigInt* b = (EclBigInt*)v->ptr;
         double r = 0.0;
@@ -2977,9 +3366,38 @@ void runtime_float(Value* result, Value* v) {
         }
         result->f = b->sign < 0 ? -r : r;
     }
-    else result->f = 0.0;
+    else {
+        result->f = 0.0;
+    }
 }
-void runtime_bool(Value* result, Value* v) { result->tag = VAL_BOOL; result->i = runtime_truthy(v); }
+
+void runtime_len(Value* result, Value* v) {
+    v = deref_ptr(v);
+    result->tag = VAL_INT;
+    if (v->tag == VAL_STR) {
+        result->i = my_strlen(v->s);
+    }
+    else if (v->tag == VAL_LIST || v->tag == VAL_TUPLE) {
+        result->i = ((EclList*)v->ptr)->len;
+    }
+    else if (v->tag == VAL_DICT) {
+        result->i = ((EclDict*)v->ptr)->size;
+    }
+    else if (v->tag == VAL_BUFFER) {
+        result->i = ((EclBuffer*)v->ptr)->size;
+    }
+    else {
+        result->i = 0;
+    }
+}
+
+void runtime_bool(Value* result, Value* v) {
+    result->tag = VAL_BOOL;
+    result->i = runtime_truthy(v);
+}
+
+
+
 void runtime_type(Value* result, Value* v) {
     result->tag = VAL_STR;
     switch (v->tag) {

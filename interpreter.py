@@ -6,8 +6,8 @@ from decimal import Decimal, InvalidOperation
 
 from class_and_vars import (
     EclInstance, EclClass, EclFunction, EclOverload, Cell, NULL, UNKNOWN,
-    BaseProxy, ScopeView, I64, I32, EclBuffer, EclStruct, WStr, CodeLiteral,
-    _NO_MAGIC, MAGIC_METHODS, REVERSE_METHODS,
+    BaseProxy, ScopeView, I64, I32, EclBuffer, EclStruct, WStr,
+    CodeLiteral, _NO_MAGIC, MAGIC_METHODS, REVERSE_METHODS,
 )
 from vm import CodeObject, GlobalView, VM
 from compiler import Compiler
@@ -18,8 +18,9 @@ class Interpreter:
     def __init__(self, allow_dll=True):
         self.globals = {}
         self.allow_dll = allow_dll
-        self.structs = None          # 延迟导入 dll_support.StructRegistry
-        self.dll_libraries = {}      # path -> dll_support.NativeLibrary
+        self.structs = None      # 延迟导入 dll_support.StructRegistry
+        self.dll_libraries = {}  # path -> dll_support.NativeLibrary
+        self._int_vm = None      # int 特化函数专用 VM（惰性创建）
         self._init_builtins()
 
     # ============================================================
@@ -64,11 +65,11 @@ class Interpreter:
         g['exit'] = Cell(self._builtin_exit)
         g['new_buffer'] = Cell(self._builtin_new_buffer)
         g['sizeof'] = Cell(self._builtin_sizeof)
-        for ename in ('Exception', 'ValueError', 'TypeError',
-                      'IndexError', 'KeyError', 'ZeroDivisionError',
-                      'RuntimeError', 'NameError', 'AttributeError',
-                      'ConstChangingError', 'SyntaxError',
-                      'DllNotFoundError'):
+        g['pop'] = Cell(self._builtin_pop)
+        for ename in ('Exception', 'ValueError', 'TypeError', 'IndexError',
+                      'KeyError', 'ZeroDivisionError', 'RuntimeError',
+                      'NameError', 'AttributeError', 'ConstChangingError',
+                      'SyntaxError', 'DllNotFoundError'):
             g[ename] = Cell(self._make_exception_class(ename))
 
     @staticmethod
@@ -202,6 +203,9 @@ class Interpreter:
             self.error(
                 f"{self._builtin_type(obj)} 没有长度", None, 'TypeError')
 
+    def _builtin_pop(self, iterable):
+        return iterable.pop()
+
     def _builtin_str(self, obj):
         if obj is None:
             return "none"
@@ -325,7 +329,8 @@ class Interpreter:
             except (TypeError, ValueError):
                 self.error("dict() 需要键值对序列", None, 'TypeError')
         self.error(
-            f"无法将 {self._builtin_type(obj)} 转换为 dict", None, 'TypeError')
+            f"无法将 {self._builtin_type(obj)} 转换为 dict",
+            None, 'TypeError')
 
     def _builtin_slice(self, seq, start, end):
         if seq is UNKNOWN:
@@ -467,8 +472,8 @@ class Interpreter:
         if value is NULL:
             return NULL
         base = type_name.split('[')[0].strip().split()[0]
-        if base in ('int', 'i64', 'i32', 'float', 'double', 'str', 'bool',
-                    'bi', 'cstr', 'ptr'):
+        if base in ('int', 'i64', 'i32', 'float', 'double', 'str',
+                    'bool', 'bi', 'cstr', 'ptr'):
             if base == 'int':
                 return self._builtin_int(value)
             if base == 'i64':
@@ -535,7 +540,8 @@ class Interpreter:
         if isinstance(value, EclStruct):
             return value.type_name == name
         if name == 'function':
-            return isinstance(value, (EclFunction, EclOverload)) or callable(value)
+            return isinstance(value, (EclFunction, EclOverload)) \
+                or callable(value)
         if isinstance(value, EclInstance):
             return value.cls.name == name
         if isinstance(value, EclClass):
@@ -571,8 +577,9 @@ class Interpreter:
             'add': '+', 'sub': '-', 'mul': '*', 'div': '/',
             'floordiv': '//', 'mod': '%', 'pow': '**',
             'eq': '==', 'ne': '!=', 'lt': '<', 'gt': '>',
-            'le': '<=', 'ge': '>=', 'bor': '|', 'band': '&',
-            'xor': '^', 'lshift': '<<', 'rshift': '>>',
+            'le': '<=', 'ge': '>=',
+            'bor': '|', 'band': '&', 'xor': '^',
+            'lshift': '<<', 'rshift': '>>',
         }.get(kind, kind)
 
         if kind in ('eq', 'ne'):
@@ -580,10 +587,12 @@ class Interpreter:
                 both = a is UNKNOWN and b is UNKNOWN
                 return both if kind == 'eq' else not both
             return bool(a == b) if kind == 'eq' else bool(a != b)
+
         if a is UNKNOWN or b is UNKNOWN:
             self.error("unknown 不能参与运算", None, 'TypeError')
 
         a, b = self._normalize_numeric(a, b)
+
         try:
             result = None
             if op == '+':
@@ -624,10 +633,12 @@ class Interpreter:
                 result = a << b
             elif op == '>>':
                 result = a >> b
+
             if result is NotImplemented:
                 self.error(
                     f"类型不支持运算: {self._builtin_type(a)} {op} "
-                    f"{self._builtin_type(b)}", None, 'TypeError')
+                    f"{self._builtin_type(b)}",
+                    None, 'TypeError')
             return result
         except EclException:
             raise
@@ -657,8 +668,9 @@ class Interpreter:
         kind = {
             '+': 'add', '-': 'sub', '*': 'mul', '/': 'div',
             '//': 'floordiv', '%': 'mod', '**': 'pow',
-            '=': 'eq', '==': 'eq', '!=': 'ne', '<': 'lt', '>': 'gt',
-            '<=': 'le', '>=': 'ge', '|': 'bor', '&': 'band', '^': 'xor',
+            '=': 'eq', '==': 'eq', '!=': 'ne',
+            '<': 'lt', '>': 'gt', '<=': 'le', '>=': 'ge',
+            '|': 'bor', '&': 'band', '^': 'xor',
             '<<': 'lshift', '>>': 'rshift',
         }.get(op)
         if kind is None:
@@ -703,14 +715,14 @@ class Interpreter:
             method_stmt = obj.find_method(method_name)
             if method_stmt is not None:
                 if len(method_stmt) == 6:
-                    code, params, varargs, kwargs, ret, defaults = method_stmt
+                    code, params, varargs, kwargs, ret, defaults = \
+                        method_stmt
                 else:
                     code, params, varargs, kwargs, ret = method_stmt
                     defaults = {}
                 fn = EclFunction(method_name, code, params, varargs,
                                  kwargs, ret, self, defaults)
                 return self.call_function_ir(fn, args, {})
-            return _NO_MAGIC
         return _NO_MAGIC
 
     # ============================================================
@@ -721,7 +733,8 @@ class Interpreter:
         method = proxy.base_cls.find_method(name)
         if method is not None:
             instance = proxy.instance
-            return lambda *a, **kw: self.call_method_ir(method, instance, a, kw)
+            return lambda *a, **kw: self.call_method_ir(
+                method, instance, a, kw)
         if name in proxy.instance.attrs:
             return proxy.instance.attrs[name]
         return NULL
@@ -731,26 +744,30 @@ class Interpreter:
             return obj.address()
         if isinstance(obj, EclStruct):
             return obj.address()
-        self.error(f"不能对 {self._builtin_type(obj)} 取地址", None, 'TypeError')
+        self.error(
+            f"不能对 {self._builtin_type(obj)} 取地址", None, 'TypeError')
 
     def get_attr(self, obj, name):
         # ---------- CodeObject ----------
         if isinstance(obj, CodeObject):
             if name == 'run':
                 return obj.run
-            self.error(f"code 对象没有属性 '{name}'", None, 'AttributeError')
+            self.error(
+                f"code 对象没有属性 '{name}'", None, 'AttributeError')
 
         # ---------- GlobalView ----------
         if isinstance(obj, GlobalView):
             if name == 'keys':
                 return obj.keys
             if name == 'get':
-                return lambda k, default=None: obj.cells[k].value if k in obj.cells else default
+                return lambda k, default=None: (
+                    obj.cells[k].value if k in obj.cells else default)
             if name == 'has':
                 return lambda k: k in obj.cells
             if name in obj.cells:
                 return obj.cells[name].value
-            self.error(f"global 对象没有变量 '{name}'", None, 'AttributeError')
+            self.error(
+                f"global 对象没有变量 '{name}'", None, 'AttributeError')
 
         # ---------- ScopeView (last) ----------
         if isinstance(obj, ScopeView):
@@ -776,25 +793,28 @@ class Interpreter:
                     method_stmt, obj, a, kw)
             if name.startswith('__') and name.endswith('__'):
                 return NULL
-            self.error(f"对象 '{obj.cls.name}' 没有属性 '{name}'",
-                       None, 'AttributeError')
+            self.error(
+                f"对象 '{obj.cls.name}' 没有属性 '{name}'",
+                None, 'AttributeError')
 
         # ---------- EclClass ----------
         if isinstance(obj, EclClass):
             method_stmt = obj.find_method(name)
             if method_stmt is not None:
                 if len(method_stmt) == 6:
-                    code, params, varargs, kwargs, ret, defaults = method_stmt
+                    code, params, varargs, kwargs, ret, defaults = \
+                        method_stmt
                 else:
                     code, params, varargs, kwargs, ret = method_stmt
                     defaults = {}
-                fn = EclFunction(name, code, params, varargs,
-                                 kwargs, ret, self, defaults)
+                fn = EclFunction(name, code, params, varargs, kwargs,
+                                 ret, self, defaults)
                 return lambda *a, **kw: self.call_function_ir(fn, a, kw)
             if name.startswith('__') and name.endswith('__'):
                 return NULL
-            self.error(f"类 '{obj.name}' 没有属性 '{name}'",
-                       None, 'AttributeError')
+            self.error(
+                f"类 '{obj.name}' 没有属性 '{name}'",
+                None, 'AttributeError')
 
         # ---------- 原生类型 ----------
         DIV_MAP = {
@@ -813,7 +833,6 @@ class Interpreter:
             return lambda: list(obj.values())
         if isinstance(obj, tuple) and name == 'get':
             return lambda i: obj[int(i)]
-
         try:
             return getattr(obj, name)
         except AttributeError:
@@ -824,7 +843,8 @@ class Interpreter:
                     return NULL
             if name.startswith('__') and name.endswith('__'):
                 return NULL
-            self.error(f"对象没有属性 '{name}'", None, 'AttributeError')
+            self.error(
+                f"对象没有属性 '{name}'", None, 'AttributeError')
 
     def get_attr_opt(self, obj, name):
         try:
@@ -855,20 +875,39 @@ class Interpreter:
         try:
             setattr(obj, name, val)
         except AttributeError:
-            self.error(f"对象不支持属性赋值: {name}", None, 'AttributeError')
+            self.error(
+                f"对象不支持属性赋值: {name}", None, 'AttributeError')
 
     # ============================================================
     # 调用
     # ============================================================
 
+    def _ensure_int_vm(self):
+        """int 特化函数专用的轻量 VM（惰性创建，递归时复用）。"""
+        if self._int_vm is None:
+            self._int_vm = VM([], [], {}, self)
+            self._int_vm.scope = self.globals
+            self._int_vm.parent_scope = []
+        return self._int_vm
+
     def call_value(self, func, args, kwargs):
+        # ---------- int 特化函数：走 VM 的 int 解释路径 ----------
+        if getattr(func, 'is_int_func', False):
+            if kwargs:
+                self.error(
+                    f"int 特化函数 {func.name} 暂不支持关键字调用",
+                    None, 'TypeError')
+            return self._ensure_int_vm().call_int_func(func, list(args))
+
         if isinstance(func, EclInstance):
             method = func.cls.find_method('__call__')
             if method is not None:
                 return self.call_method_ir(method, func, args, kwargs)
             self.error("对象不可调用（没有 __call__）", None, 'TypeError')
+
         if not callable(func):
             self.error(f"对象不可调用: {func!r}", None, 'TypeError')
+
         try:
             return func(*args, **kwargs)
         except EclException:
@@ -907,9 +946,11 @@ class Interpreter:
         pos = 0
         param_names = set()
         positional_names = set()
+
         for p in params:
             pname = p['name']
             param_names.add(pname)
+
             if p.get('varargs'):
                 rest = list(args[pos:])
                 pos = len(args)
@@ -917,8 +958,10 @@ class Interpreter:
                     rest = [self.convert_type(x, p['type']) for x in rest]
                 scope[pname] = Cell(rest)
                 continue
+
             if p.get('kwargs'):
                 continue
+
             if pos < len(args):
                 val = args[pos]
                 pos += 1
@@ -928,8 +971,10 @@ class Interpreter:
             elif pname in fn.defaults:
                 val = fn.defaults[pname]
             else:
-                self.error(f"函数 '{fn.name}' 缺少参数 '{pname}'",
-                           None, 'TypeError')
+                self.error(
+                    f"函数 '{fn.name}' 缺少参数 '{pname}'",
+                    None, 'TypeError')
+
             if p.get('type'):
                 val = self.convert_type(val, p['type'])
             scope[pname] = Cell(val)
@@ -942,7 +987,8 @@ class Interpreter:
             if k in positional_names:
                 self.error(
                     f"函数 '{fn.name}' 的关键字参数 '{k}' "
-                    f"与位置参数冲突", None, 'TypeError')
+                    f"与位置参数冲突",
+                    None, 'TypeError')
             if k in param_names:
                 continue
             if fn.kwargs:
@@ -951,6 +997,7 @@ class Interpreter:
                 self.error(
                     f"函数 '{fn.name}' 收到未知关键字参数 '{k}'",
                     None, 'TypeError')
+
         if fn.kwargs:
             scope[fn.kwargs] = Cell(extra_kw)
 
@@ -970,14 +1017,16 @@ class Interpreter:
     def call_method_ir(self, method_stmt, instance, args, kwargs):
         if isinstance(method_stmt, tuple):
             if len(method_stmt) == 6:
-                code, params, varargs, kwargs_name, ret, defaults = method_stmt
+                code, params, varargs, kwargs_name, ret, defaults = \
+                    method_stmt
             else:
                 code, params, varargs, kwargs_name, ret = method_stmt
                 defaults = {}
             fn = EclFunction('__method__', code, params, varargs,
                              kwargs_name, ret, self, defaults)
-            return self.call_function_ir(fn, (instance,) + tuple(args),
-                                         kwargs, self_instance=instance)
+            return self.call_function_ir(
+                fn, (instance,) + tuple(args), kwargs,
+                self_instance=instance)
         self.error("call_method_ir 不支持 AST 版方法", None)
 
     def call_overload(self, ov, args, kwargs):
@@ -992,6 +1041,7 @@ class Interpreter:
             if required <= supplied <= len(positional) or (
                     has_varargs and supplied >= required):
                 candidates.append(fn)
+
         if not candidates:
             self.error(
                 f"函数 '{ov.name}' 没有匹配的重载（传入 {supplied} 个参数）",
@@ -1008,7 +1058,8 @@ class Interpreter:
                 actual = self._builtin_type(arg)
                 if expected and actual == expected:
                     s += 2
-                elif expected and expected in ('int', 'i64', 'float', 'double') \
+                elif expected and expected in ('int', 'i64', 'float',
+                                               'double') \
                         and actual in ('int', 'i64', 'float', 'double'):
                     s += 1
             return (-s, index)

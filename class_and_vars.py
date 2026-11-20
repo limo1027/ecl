@@ -66,8 +66,7 @@ KEYWORDS = {
     'with', 'match', 'case', 'goto', 'label', 'public', 'private',
     'const', 'True', 'False', 'true', 'false', 'null', 'none', 'unknown',
     'any', 'in', 'out', 'struct', 'dll_import',
-    'and', 'or', 'not',}
-
+    'and', 'or', 'not', }
 OPERATORS = [
     '**=', '//=', '..=', '+=', '-=', '*=', '/=', '%=', '<->',
     '**', '//', '..', '==', '!=', '<=', '>=', '->', '<-', '<<', '>>',

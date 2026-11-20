@@ -5,18 +5,18 @@
 ## 运行
 
 ```powershell
-python main.py run example/general_test.ecl     # 解释执行
-python main.py run example/dll_test.ecl         # dll_import 示例
-python main.py run example/ask_dialog.ecl       # 是/否询问框
-python main.py run example/file_dialog.ecl      # 文件选择框（纯 ECL + struct）
-python main.py example/general_test.ecl         # 同上（旧写法）
-python main.py                                  # REPL
-python main.py compile example/simple.ecl --target asm
-python main.py compile example/simple.ecl --target exe
-python main.py compile example/simple.ecl --target dll
-python main.py compile example/fs.ecl --target dll
-python main.py compile example/fs.ecl --target dll --remove-output
-python main.py run example/fs_usage.ecl
+python ecl.py run example/general_test.ecl     # 解释执行
+python ecl.py run example/dll_test.ecl         # dll_import 示例
+python ecl.py run example/ask_dialog.ecl       # 是/否询问框
+python ecl.py run example/file_dialog.ecl      # 文件选择框（纯 ECL + struct）
+python ecl.py example/general_test.ecl         # 同上（旧写法）
+python ecl.py                                  # REPL
+python ecl.py compile example/simple.ecl --target asm
+python ecl.py compile example/simple.ecl --target exe
+python ecl.py compile example/simple.ecl --target dll
+python ecl.py compile example/fs.ecl --target dll
+python ecl.py compile example/fs.ecl --target dll --remove-output
+python ecl.py run example/fs_usage.ecl
 ```
 
 - `example/testdll.c` 是示例 DLL 的源码；`example/testdll.dll` 已随目录提供。

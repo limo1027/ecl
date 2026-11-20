@@ -1,7 +1,7 @@
 from errors import EclException, LexerError, ReturnSignal
 from class_and_vars import (NULL, UNKNOWN, Cell, EclInstance, Program,
-                            EclFunction, EclClass, EclOverload,
-                            BaseProxy, ScopeView, I64, EclStruct)
+                            EclFunction, EclClass, EclOverload, BaseProxy,
+                            ScopeView, I64, EclStruct)
 
 
 class GlobalView:
@@ -65,15 +65,14 @@ class CodeObject:
         for k, v in self.interpreter.globals.items():
             if k not in code_globals:
                 code_globals[k] = v
-
         compiler = Compiler()
         code, exception_table = compiler.compile_program(Program(stmts))
-        vm = VM(code, exception_table, code_globals, self.interpreter,
-                parent_scope=parent_scope)
+        vm = VM(code, exception_table, code_globals,
+                self.interpreter, parent_scope=parent_scope)
         vm.run()
-
         new_cells = {k: v for k, v in code_globals.items()
-                     if k not in parent_scope and k not in self.interpreter.globals}
+                     if k not in parent_scope
+                     and k not in self.interpreter.globals}
         return GlobalView(new_cells, self.interpreter)
 
     def __repr__(self):
@@ -126,7 +125,8 @@ class VM:
     def handle_exception(self, e):
         self.current_exc = e
         for entry in sorted(self.exception_table,
-                            key=lambda x: x.get('try_start', 0), reverse=True):
+                            key=lambda x: x.get('try_start', 0),
+                            reverse=True):
             start = entry.get('try_start', 0)
             end = entry.get('try_end', -1)
             if not (start <= self.pc <= end):
@@ -219,10 +219,11 @@ class VM:
 
     def exec_op(self, op):
         kind = op[0]
-
-        if kind in ('method_func', 'try', 'except', 'finally', 'func_int'):
+        if kind in ('method_func', 'try', 'except', 'finally'):
             return
-
+        if kind == 'func_int':
+            self._register_int_func(op)
+            return
         if kind == 'struct_def':
             self.interpreter.register_struct(op[1], op[2])
             return
@@ -234,38 +235,31 @@ class VM:
             return
         if kind == 'exports':
             return
-
         elif kind == 'end_try':
             # op = ('end_try', normal_label, finally_label)
             self._jump(op[1])
             return
-
-        if kind == 'const':
+        elif kind == 'const':
             _, dest, value = op
             self.temps[dest] = value
-
         elif kind == 'free':
             _, dest, args = op
             if args:
                 self.temps[args[0]] = NULL
             self.temps[dest] = NULL
-
         elif kind == 'free_var':
             _, dest, name = op
             self.set_var(name, NULL)
             self.temps[dest] = NULL
-
         elif kind == 'var':
             _, dest, name = op
             self.temps[dest] = self.get_var(name)
-
         elif kind == 'store':
             _, name, src = op
             value = self.temps[src]
             if isinstance(value, EclStruct):
                 value = value.clone()
             self.set_var(name, value)
-
         elif kind == 'ref':
             _, name, src_name = op
             cell, _ = self._scope_cell(src_name)
@@ -273,18 +267,15 @@ class VM:
                 self.interpreter.error(
                     f"ref 目标变量未定义: '{src_name}'", None, 'NameError')
             self.scope[name] = cell
-
         elif kind == 'assign':
             _, dest, src = op
             self.temps[dest] = self.temps[src]
-
-        elif kind in ('add', 'sub', 'mul', 'div', 'floordiv', 'mod', 'pow',
-                      'eq', 'ne', 'lt', 'gt', 'le', 'ge',
+        elif kind in ('add', 'sub', 'mul', 'div', 'floordiv', 'mod',
+                      'pow', 'eq', 'ne', 'lt', 'gt', 'le', 'ge',
                       'bor', 'band', 'xor', 'lshift', 'rshift'):
             _, dest, s1, s2 = op
             self.temps[dest] = self.interpreter.native_binop(
                 kind, self.temps[s1], self.temps[s2])
-
         elif kind == 'neg':
             _, dest, src = op
             self.temps[dest] = self.interpreter.native_unary(
@@ -296,17 +287,14 @@ class VM:
         elif kind == 'not':
             _, dest, src = op
             self.temps[dest] = not self.interpreter._truthy(self.temps[src])
-
         elif kind == 'convert_type':
             _, dest, src, type_name = op
             self.temps[dest] = self.interpreter.convert_type(
                 self.temps[src], type_name)
-
         elif kind == 'to_bi':
             _, dest, src = op
             self.temps[dest] = self.interpreter.convert_type(
                 self.temps[src], 'bi')
-
         elif kind == 'new_code_var':
             _, dest, src = op
             src_val = self.temps[src]
@@ -317,10 +305,8 @@ class VM:
                 self.interpreter.error(
                     f"code() 的参数必须是 str，得到 {type(src_val).__name__}",
                     None, 'TypeError')
-
         elif kind == 'goto':
             self._jump(op[1])
-
         elif kind in ('if_goto', 'if_not_goto', 'jz', 'jnz'):
             _, src, label = op
             truthy = self.interpreter._truthy(self.temps[src])
@@ -332,16 +318,13 @@ class VM:
             }[kind]
             if take:
                 self._jump(label)
-
         elif kind == 'jni':
             # 魔术方法返回 NotImplemented 时退回原生运算
             _, src, label = op
             if self.temps[src] is NotImplemented:
                 self._jump(label)
-
         elif kind == 'label':
             pass
-
         elif kind == 'call':
             _, dest, func_src, args, kwargs = op
             func = self.temps[func_src]
@@ -349,7 +332,6 @@ class VM:
             kwarg_vals = {k: self.temps[v] for k, v in kwargs.items()}
             self.temps[dest] = self.interpreter.call_value(
                 func, arg_vals, kwarg_vals)
-
         elif kind == 'call_spread':
             _, dest, func_src, pos_src, kw_src = op
             func = self.temps[func_src]
@@ -370,7 +352,6 @@ class VM:
                         None, 'TypeError')
             self.temps[dest] = self.interpreter.call_value(
                 func, list(pos), dict(kwd))
-
         elif kind == 'builtin_call':
             _, dest, fname, args, kwargs = op
             fn_cell, _ = self._scope_cell(fname)
@@ -381,49 +362,40 @@ class VM:
             kwarg_vals = {k: self.temps[v] for k, v in kwargs.items()}
             self.temps[dest] = self.interpreter.call_value(
                 fn_cell.value, arg_vals, kwarg_vals)
-
         # ---------- 内置函数（AOT 兼容指令） ----------
         elif kind == 'print':
             _, dest, args = op
             out = [self.interpreter._builtin_str(self.temps[a]) for a in args]
             print(' '.join(out))
             self.temps[dest] = None
-
         elif kind == 'str':
             _, dest, args = op
             self.temps[dest] = self.interpreter._builtin_str(
                 self.temps[args[0]]) if args else ""
-
         elif kind == 'len':
             _, dest, args = op
             self.temps[dest] = self.interpreter._builtin_len(
                 self.temps[args[0]]) if args else 0
-
         elif kind == 'int':
             _, dest, args = op
             self.temps[dest] = self.interpreter._builtin_int(
                 self.temps[args[0]]) if args else 0
-
         elif kind == 'float':
             _, dest, args = op
             self.temps[dest] = self.interpreter._builtin_float(
                 self.temps[args[0]]) if args else 0.0
-
         elif kind == 'bool':
             _, dest, args = op
             self.temps[dest] = self.interpreter._builtin_bool(
                 self.temps[args[0]]) if args else False
-
         elif kind == 'type':
             _, dest, args = op
             self.temps[dest] = self.interpreter._builtin_type(
                 self.temps[args[0]]) if args else "none"
-
         elif kind == 'range':
             _, dest, args = op
             vals = [self.temps[a] for a in args]
             self.temps[dest] = self.interpreter._builtin_range(*vals)
-
         elif kind in ('return', 'return_none', 'return_null'):
             if kind == 'return':
                 self._do_return(self.temps[op[1]])
@@ -431,7 +403,6 @@ class VM:
                 self._do_return(None)
             else:
                 self._do_return(NULL)
-
         # ---------- 容器 ----------
         elif kind == 'new_list':
             _, dest = op
@@ -492,7 +463,7 @@ class VM:
                 if k in self.temps[dest]:
                     self.interpreter.error(
                         f"关键字参数重复: '{k}'", None, 'TypeError')
-                self.temps[dest][k] = v
+            self.temps[dest].update(src_val)
         elif kind == 'to_tuple':
             _, dest, src = op
             self.temps[dest] = tuple(self.temps[src])
@@ -552,10 +523,10 @@ class VM:
         elif kind == 'set_attr':
             _, obj, name, src = op
             self.interpreter.set_attr(self.temps[obj], name, self.temps[src])
-
         # ---------- 函数 / 类 ----------
         elif kind == 'func':
-            _, name, sub_code, params, varargs, kwargs_name, ret_type, defaults = op
+            _, name, sub_code, params, varargs, kwargs_name, ret_type, \
+                defaults = op
             fn = EclFunction(name, sub_code, params, varargs, kwargs_name,
                              ret_type, self.interpreter, defaults,
                              closure=[self.scope] + self.parent_scope)
@@ -569,7 +540,6 @@ class VM:
                 old.value.add(fn)
             else:
                 self.scope[name] = Cell(fn)
-
         elif kind == 'class':
             _, name, bases, methods = op
             base_classes = []
@@ -579,21 +549,20 @@ class VM:
                     base_classes.append(bv)
             cls = EclClass(name, base_classes, methods, self.interpreter)
             self.scope[name] = Cell(cls)
-
         elif kind == 'new_code':
             _, dest, source = op
-            self.temps[dest] = CodeObject(source, self.scope, self.interpreter)
-
+            self.temps[dest] = CodeObject(source, self.scope,
+                                          self.interpreter)
         # ---------- using ----------
         elif kind == 'using_enter':
             _, dest, src = op
             val = self.temps[src]
             if not isinstance(val, (EclInstance, EclClass, BaseProxy)):
                 self.interpreter.error(
-                    f"using 的对象必须是实例或类，得到 {self.interpreter._builtin_type(val)}",
+                    f"using 的对象必须是实例或类，得到 "
+                    f"{self.interpreter._builtin_type(val)}",
                     None, 'TypeError')
             self.temps[dest] = val
-
         # ---------- with ----------
         elif kind == 'with_begin':
             _, dest, src, name, end_label = op
@@ -615,12 +584,10 @@ class VM:
                 'start_pc': self.pc,
                 'end_pc': self.labels.get(end_label, len(self.code)),
             })
-
         elif kind == 'with_end':
             if self.with_stack:
                 ctx = self.with_stack.pop()
                 self._call_leave(ctx, None, None)
-
         # ---------- 异常 ----------
         elif kind == 'raise':
             _, src = op
@@ -631,12 +598,10 @@ class VM:
                 msg = getattr(exc, 'message', str(exc))
                 raise EclException(exc.exc_type, msg)
             raise EclException('Exception', str(exc))
-
         elif kind == 'reraise':
             if self.current_exc is not None:
                 raise self.current_exc
             self.interpreter.error("没有可重新抛出的异常", None, 'RuntimeError')
-
         elif kind == 'exc_match':
             _, dest, type_name = op
             if self.current_exc is None:
@@ -646,11 +611,9 @@ class VM:
             else:
                 self.temps[dest] = self.interpreter.exc_matches(
                     self.current_exc.exc_type, type_name)
-
         elif kind == 'store_exc':
             _, name = op
             self.set_var(name, self.current_exc)
-
         # ---------- match ----------
         elif kind == 'match_eq':
             _, dest, src, pat = op
@@ -665,15 +628,12 @@ class VM:
             _, dest, src, type_name = op
             self.temps[dest] = self.interpreter.is_type(
                 self.temps[src], type_name)
-
         # ---------- 赋值解包 ----------
         elif kind == 'unpack_assign':
             _, src, targets = op
             self._unpack_assign(self.temps[src], targets)
-
         elif kind == 'halt':
             self.pc = len(self.code)
-
         else:
             raise EclException('RuntimeError', f"未知指令: {kind}")
 
@@ -681,7 +641,8 @@ class VM:
         if not isinstance(value, (list, tuple)):
             self.interpreter.error(
                 f"赋值解包要求 list/tuple，得到 "
-                f"{self.interpreter._builtin_type(value)}", None, 'TypeError')
+                f"{self.interpreter._builtin_type(value)}",
+                None, 'TypeError')
         seq = list(value)
         star_idx = None
         for i, (name, star) in enumerate(targets):
@@ -712,3 +673,151 @@ class VM:
         self.set_var(star_name, seq[len(pre):len(seq) - len(post)])
         for (name, _), v in zip(post, seq[len(seq) - len(post):]):
             self.set_var(name, v)
+
+    # ==========================================================
+    # ---------- int 特化函数（与 asm.py gen_int_op 语义对齐） ----------
+    # ==========================================================
+
+    _INT_PARAM_TYPES = ('int', 'i64', 'i32', 'bool')
+
+    def _register_int_func(self, op):
+        """('func_int', name, body, params, ret_type) -> 注册为可调用函数"""
+        _, name, sub_code, params, ret_type = op
+        fn = EclFunction(name, sub_code, params, None, None, ret_type,
+                         self.interpreter, {},
+                         closure=[self.scope] + self.parent_scope)
+        fn.is_int_func = True
+        # 重载处理与 'func' 指令保持一致
+        old = self.scope.get(name)
+        if old is not None and isinstance(old.value, EclFunction):
+            ov = EclOverload(name, self.interpreter)
+            ov.add(old.value)
+            ov.add(fn)
+            self.scope[name] = Cell(ov)
+        elif old is not None and isinstance(old.value, EclOverload):
+            old.value.add(fn)
+        else:
+            self.scope[name] = Cell(fn)
+
+    def _int_load(self, temps, operand):
+        """操作数取值：('reg', name) / ('imm', n) / ('tmp', t)"""
+        kind, val = operand
+        if kind == 'imm':
+            return val
+        # reg 和 tmp 都按名字存进 temps，取值逻辑一致
+        return temps[val]
+
+    def call_int_func(self, fn, args):
+        """解释执行 int 特化函数体。指令语义与 asm.py 的 gen_int_op 一一对应。"""
+        interpreter = self.interpreter
+        params = fn.params
+
+        if len(args) != len(params):
+            interpreter.error(
+                f"{fn.name}() 需要 {len(params)} 个参数，得到 {len(args)} 个",
+                None, 'TypeError')
+
+        temps = {}
+        for i, p in enumerate(params):
+            v = args[i]
+            t = p.get('type')
+            # 与 AOT 函数入口的 runtime_convert 对齐
+            if t in self._INT_PARAM_TYPES:
+                v = interpreter.convert_type(v, t)
+            temps[p['name']] = v  # ('reg', name) 取值来源
+
+        body = fn.code
+        labels = {}
+        for i, op in enumerate(body):
+            if op[0] == 'label':
+                labels[op[1]] = i + 1
+
+        pc = 0
+        n = len(body)
+        while pc < n:
+            op = body[pc]
+            pc += 1
+            k = op[0]
+
+            if k == 'label':
+                continue
+
+            elif k == 'int_assign':
+                temps[op[1]] = self._int_load(temps, op[2])
+
+            elif k == 'int_store_var':
+                temps[op[1]] = self._int_load(temps, op[2])
+
+            elif k == 'int_add':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                + self._int_load(temps, op[3]))
+            elif k == 'int_sub':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                - self._int_load(temps, op[3]))
+            elif k == 'int_mul':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                * self._int_load(temps, op[3]))
+            elif k == 'int_lt':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                < self._int_load(temps, op[3]))
+            elif k == 'int_gt':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                > self._int_load(temps, op[3]))
+            elif k == 'int_le':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                <= self._int_load(temps, op[3]))
+            elif k == 'int_ge':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                >= self._int_load(temps, op[3]))
+            elif k == 'int_eq':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                == self._int_load(temps, op[3]))
+            elif k == 'int_ne':
+                temps[op[1]] = (self._int_load(temps, op[2])
+                                != self._int_load(temps, op[3]))
+
+            elif k == 'int_and':
+                temps[op[1]] = (bool(self._int_load(temps, op[2]))
+                                and bool(self._int_load(temps, op[3])))
+            elif k == 'int_or':
+                temps[op[1]] = (bool(self._int_load(temps, op[2]))
+                                or bool(self._int_load(temps, op[3])))
+
+            elif k == 'int_neg':
+                temps[op[1]] = -self._int_load(temps, op[2])
+            elif k == 'int_not':
+                temps[op[1]] = not self._int_load(temps, op[2])
+
+            elif k == 'int_jz':
+                if not self._int_load(temps, op[1]):
+                    pc = labels[op[2]]
+            elif k == 'int_jnz':
+                if self._int_load(temps, op[1]):
+                    pc = labels[op[2]]
+
+            elif k == 'goto':
+                pc = labels[op[1]]
+
+            elif k == 'int_call':
+                _, dest, fname, cargs = op
+                callee = self.get_var(fname)
+                if callee is UNKNOWN:
+                    interpreter.error(
+                        f"int 特化调用了未定义函数: '{fname}'",
+                        None, 'NameError')
+                temps[dest] = interpreter.call_value(
+                    callee,
+                    [self._int_load(temps, a) for a in cargs], {})
+
+            elif k == 'int_ret':
+                return self._int_load(temps, op[1])
+            elif k == 'int_ret_zero':
+                return 0
+            elif k == 'halt':
+                return 0
+
+            else:
+                interpreter.error(
+                    f"int 特化暂不支持指令: {k}", None, 'RuntimeError')
+
+        return 0  # 走到函数末尾，等价 int_ret_zero

@@ -648,7 +648,7 @@ class Compiler:
 
         # int 特化会生成独立 ABI 的函数，导致 *args/**kwargs/变量调用取不到
         # 函数值；AOT 以行为一致优先，关闭特化。
-        is_int_func = False
+        is_int_func = self._is_int_func(stmt)
         if is_int_func:
             sub.int_mode = True
             sub._int_func_name = stmt.name
@@ -685,10 +685,10 @@ class Compiler:
             return False
         if len(stmt.params) > 4:
             return False
-        if stmt.return_type != 'int':
+        if stmt.return_type != 'i64':
             return False
         for p in stmt.params:
-            if p.get('type') != 'int':
+            if p.get('type') != 'i64':
                 return False
         return self._body_is_int_only(stmt.body, stmt.name)
 
@@ -967,6 +967,7 @@ class Compiler:
         self.break_depth -= 1
         self.break_label, self.continue_label = old_break, old_continue
     # ---------- try ----------
+
     def _compile_with_aot(self, stmt):
         ctxs = []
         for expr, name in stmt.items:

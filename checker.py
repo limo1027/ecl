@@ -737,18 +737,21 @@ class Checker:
             self.match_depth -= 1
 
     # ---------- with ----------
-
     def check_with(self, stmt):
-        self.push_scope()
         for expr, name in stmt.items:
             et = self.check_expr(expr)
             if et in SCALAR_TYPES - {'unknown'}:
                 self.warn(
-                    f"with 的对象类型是 {et}，运行时可能抛 TypeError", stmt)
+                    f"with 的对象类型是 {et}，运行时可能抛 TypeError",
+                    stmt)
             if name:
-                self.declare(name, 'any', node=stmt)
-        self._check_block(stmt.body)
-        self.pop_scope()
+                self.declare(name, 'any', node=stmt)   # 外层作用域
+
+        self.push_scope()
+        try:
+            self._check_block(stmt.body)
+        finally:
+            self.pop_scope()
 
     # ---------- using ----------
 

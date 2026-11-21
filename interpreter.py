@@ -944,10 +944,19 @@ class Interpreter:
 
         params = fn.params
         pos = 0
+
+        # 隐式 self：编译器可能在 params[0] 注入了 self，
+        # self 已通过 self_instance 绑定，实参对齐时跳过它。
+        start = 0
+        if (self_instance is not None
+                and params
+                and params[0].get('name') == 'self'):
+            start = 1
+
         param_names = set()
         positional_names = set()
 
-        for p in params:
+        for p in params[start:]:
             pname = p['name']
             param_names.add(pname)
 
@@ -1012,6 +1021,7 @@ class Interpreter:
         if fn.ret_type and ret is not None and ret is not NULL \
                 and ret is not UNKNOWN:
             ret = self.convert_type(ret, fn.ret_type)
+
         return ret
 
     def call_method_ir(self, method_stmt, instance, args, kwargs):
@@ -1025,7 +1035,7 @@ class Interpreter:
             fn = EclFunction('__method__', code, params, varargs,
                              kwargs_name, ret, self, defaults)
             return self.call_function_ir(
-                fn, (instance,) + tuple(args), kwargs,
+                fn, tuple(args), kwargs,
                 self_instance=instance)
         self.error("call_method_ir 不支持 AST 版方法", None)
 

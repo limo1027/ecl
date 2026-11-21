@@ -574,7 +574,7 @@ class VM:
                     "with 的对象必须实现 __enter__ 和 __leave__",
                     None, 'TypeError')
             entered = self.interpreter.call_value(enter, [], {})
-            self.temps[dest] = obj
+            self.temps[dest] = entered
             if name:
                 self.set_var(name, entered)
             self.with_stack.append({

@@ -978,7 +978,7 @@ class Compiler:
             leave = self.new_temp('any')
             self.emit('with_enter', entered, leave, obj)
             if name:
-                self.emit('store', name, entered)
+                self.emit('store_share', name, entered)
                 self._mark_assigned(name)
             ctxs.append({'leave': leave, 'break_depth': self.break_depth})
 

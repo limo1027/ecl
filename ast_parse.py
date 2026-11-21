@@ -419,15 +419,20 @@ class Parser:
             self.expect('SYMBOL', '(')
             params = []
             while not self.match('SYMBOL', ')'):
-                ptype = None
                 nxt = self.current()
+                type_ = None
                 # 参数可以带类型: int x
                 if nxt and (nxt.type in ('IDENTIFIER', 'TYPE')
                             or (nxt.type == 'KEYWORD'
                                 and nxt.value in BUILTIN_TYPES)):
-                    ptype = self.advance().value
-                pname_tok = self.expect('IDENTIFIER')
-                params.append({'name': pname_tok.value,
+                    type_ = self.advance().value
+                if self.match('IDENTIFIER'):
+                    pname_tok_value = self.expect('IDENTIFIER').value
+                    ptype = type_
+                else:
+                    pname_tok_value = type_
+                    ptype = None
+                params.append({'name': pname_tok_value,
                               'type': ptype, 'default': None})
                 if self.match('SYMBOL', ','):
                     self.advance()
@@ -1247,11 +1252,11 @@ class Parser:
 
         # 列表
         if tok.type == 'SYMBOL' and tok.value == '[':
-            return self.parse_list()
+            return self._parse_postfix(self.parse_list())
 
         # 字典
         if tok.type == 'SYMBOL' and tok.value == '{':
-            return self.parse_dict()
+            return self._parse_postfix(self.parse_dict())
 
         # 标识符 / 调用
         if tok.type in ('IDENTIFIER', 'TYPE'):

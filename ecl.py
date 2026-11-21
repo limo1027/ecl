@@ -274,6 +274,8 @@ def run_ecl(content, source_path=None, without_check=False,
         try:
             interp.run_bytecode(ir, exception_table)
         except EclException as e:
+            import traceback
+            traceback.print_exc()
             print(f"运行时错误: {e}", file=sys.stderr)
             return None
         except Exception as e:

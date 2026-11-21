@@ -662,6 +662,7 @@ static int value_eq_raw(Value a, Value b) {
         case VAL_FLOAT: return a.f == b.f;
         case VAL_STR: return my_strcmp(a.s, b.s) == 0;
         case VAL_NULL: case VAL_NONE: case VAL_UNKNOWN: return 1;
+        case VAL_LIST:
         case VAL_TUPLE: {
             EclList* x = (EclList*)a.ptr;
             EclList* y = (EclList*)b.ptr;
@@ -1705,6 +1706,13 @@ void runtime_eq(Value* result, Value* a, Value* b) {
         double bf = (b->tag == VAL_FLOAT) ? b->f : (double)b->i;
         eq = af == bf;
     }
+    /* list/tuple/dict 内容比较（与解释器 Python == 语义一致） */
+    else if ((a->tag == VAL_LIST || a->tag == VAL_TUPLE) && a->tag == b->tag) {
+        result->tag = VAL_BOOL;
+        result->i = value_eq_raw(av, bv);
+        return;
+    }
+
     else if (a->tag == b->tag) {
         switch (a->tag) {
             case VAL_STR:
@@ -1719,6 +1727,7 @@ void runtime_eq(Value* result, Value* a, Value* b) {
             case VAL_INSTANCE:
                 eq = a->ptr == b->ptr;
                 break;
+
             default:
                 eq = 0;
         }
@@ -2101,15 +2110,68 @@ void runtime_builtin_call(Value* result, const char* name, Value** args,
         return;
     }
     if (my_strcmp(name, "round") == 0 && argc >= 1) {
-        if (args[0]->tag == VAL_FLOAT) {
+        if (args[0]->tag == VAL_FLOAT || args[0]->tag == VAL_DOUBLE) {
             double f = args[0]->f;
-            int64_t digits = (argc >= 2 && args[1]->tag == VAL_INT) ? args[1]->i : 0;
-            double scale = 1.0;
-            for (int64_t i = 0; i < digits; i++) scale *= 10.0;
-            double x = f * scale;
-            int64_t r = (int64_t)(x >= 0 ? x + 0.5 : x - 0.5);
-            result->tag = VAL_FLOAT; result->f = (double)r / scale;
-        } else if (args[0]->tag == VAL_INT) { *result = *args[0]; value_share(result); }
+            int has_digits = (argc >= 2 && args[1]->tag == VAL_INT);
+            int64_t digits = has_digits ? args[1]->i : 0;
+
+            if (digits <= 0) {
+                /* 对整数部分做四舍六入五成双（digits=0 或负数） */
+                double x = f;
+                for (int64_t i = 0; i < -digits; i++) x /= 10.0;
+
+                /* floor（无 CRT，复用 floordiv 的写法） */
+                int64_t fl = (int64_t)x;
+                if ((double)fl > x) fl--;
+
+                double diff = x - (double)fl;
+                int64_t r;
+                if (diff > 0.5) {
+                    r = fl + 1;
+                } else if (diff < 0.5) {
+                    r = fl;
+                } else {
+                    /* 恰好 .5：取偶数 */
+                    r = (fl % 2 == 0) ? fl : fl + 1;
+                }
+                /* 补回被 10^-digits 放缩的部分 */
+                for (int64_t i = 0; i < -digits; i++) r *= 10;
+
+                if (has_digits) {
+                    result->tag = VAL_FLOAT;
+                    result->f = (double)r;
+                } else {
+                    result->tag = VAL_INT;
+                    result->i = r;
+                }
+            } else {
+                /* 正位数：先放大，舍入，再缩回 */
+                double scale = 1.0;
+                for (int64_t i = 0; i < digits; i++) scale *= 10.0;
+                double x = f * scale;
+
+                int64_t fl = (int64_t)x;
+                if ((double)fl > x) fl--;
+
+                double diff = x - (double)fl;
+                int64_t r;
+                if (diff > 0.5) {
+                    r = fl + 1;
+                } else if (diff < 0.5) {
+                    r = fl;
+                } else {
+                    r = (fl % 2 == 0) ? fl : fl + 1;
+                }
+
+                result->tag = VAL_FLOAT;
+                result->f = (double)r / scale;
+            }
+        } else if (args[0]->tag == VAL_INT) {
+            /* 整数且无位数：原样返回（Python round(int) == int） */
+            *result = *args[0];
+            value_share(result);
+            /* 有位数时 Python 也返回 int 本身，无需处理 */
+        }
         return;
     }
     if (my_strcmp(name, "random") == 0) {
@@ -2165,17 +2227,103 @@ void runtime_builtin_call(Value* result, const char* name, Value** args,
 // 函数 / 类
 // ============================================================
 typedef struct EclFunction {
-    char* name; void* code; int param_count; Value* defaults;
-    EclSig* sig; struct EclFunction* next;
+    char* name;
+    void* code;
+    int param_count;
+    Value* defaults;
+    EclSig* sig;
+    struct EclFunction* next;
+    EclDict* captures;    // ★ 闭包捕获快照（NULL = 无捕获）
 } EclFunction;
 
 void runtime_new_function(Value* result, const char* name, void* code, EclSig* sig) {
     EclFunction* fn = (EclFunction*)no_crt_alloc(sizeof(EclFunction));
-    fn->name = my_strdup(name); fn->code = code;
+    fn->name = my_strdup(name);
+    fn->code = code;
     fn->param_count = sig ? (int)sig->count : 0;
-    fn->defaults = 0; fn->sig = sig; fn->next = 0;
-    result->tag = VAL_FUNCTION; result->ptr = fn;
+    fn->defaults = 0;
+    fn->sig = sig;
+    fn->next = 0;
+    fn->captures = 0;    // ★
+    result->tag = VAL_FUNCTION;
+    result->ptr = fn;
 }
+
+// ============================================================
+// 闭包捕获（快照式）
+//
+// 语义：执行 func 定义指令时（gen_cap_dict），把该函数体内引用的
+// __cap_ 全局槽的当前值打包进一个 dict，绑到函数对象上。
+// 每次调用该函数实例时压入捕获栈，函数体内的 __cap_ 读写沿栈查找，
+// 找不到回退普通全局槽（保持无捕获时的行为不变）。
+// ============================================================
+
+// 绑定捕获字典到函数对象（asm: runtime_new_function 之后调用）
+void runtime_func_captures(Value* fnval, Value* dict) {
+    if (!fnval || fnval->tag != VAL_FUNCTION || !dict) return;
+    if (dict->tag != VAL_DICT) return;
+    EclFunction* fn = (EclFunction*)fnval->ptr;
+    fn->captures = (EclDict*)dict->ptr;
+}
+
+#define CAP_STACK_MAX 256
+static EclDict* g_cap_stack[CAP_STACK_MAX];
+static int g_cap_top = 0;
+
+void runtime_cap_push(Value* dict) {
+    if (dict && dict->tag == VAL_DICT && g_cap_top < CAP_STACK_MAX) {
+        g_cap_stack[g_cap_top++] = (EclDict*)dict->ptr;
+        return;
+    }
+    // 压入 NULL 占位，保证 push/pop 严格配对
+    if (g_cap_top < CAP_STACK_MAX) g_cap_stack[g_cap_top++] = 0;
+}
+
+void runtime_cap_push_value(EclDict* d) {
+    if (g_cap_top < CAP_STACK_MAX) g_cap_stack[g_cap_top++] = d;
+}
+
+
+void runtime_cap_pop(void) {
+    if (g_cap_top > 0) g_cap_top--;
+}
+
+// 构造查找用的字符串 key（复用全局槽名字符串，生命周期覆盖整个程序）
+static Value cap_key(const char* name) {
+    Value key;
+    key.tag = VAL_STR;
+    key.i = 0;
+    key.s = (char*)name;
+    return key;
+}
+
+// 读捕获变量：沿捕获栈从顶向下找第一个含该名字的 dict；
+// 没找到回退普通全局槽。out = 槽指针（调用方直接读 *out 两个 qword）
+Value* runtime_cap_get(const char* name) {
+    Value key = cap_key(name);
+    for (int i = g_cap_top - 1; i >= 0; i--) {
+        if (!g_cap_stack[i]) continue;
+        EclDictEntry* e = dict_find(g_cap_stack[i], key);
+        if (e) return &e->val;
+    }
+    return get_var(name);
+}
+
+// 写捕获变量：沿捕获栈从顶向下找第一个【已含该名字】的 dict，原地覆盖；
+// 栈上没有任何 dict 含该名字 → 写普通全局槽
+void runtime_cap_set(const char* name, Value* v) {
+    Value key = cap_key(name);
+    for (int i = g_cap_top - 1; i >= 0; i--) {
+        if (!g_cap_stack[i]) continue;
+        if (dict_find(g_cap_stack[i], key)) {
+            dict_put_raw(g_cap_stack[i], key, *v);
+            return;
+        }
+    }
+    Value* slot = get_var_slot(name);
+    *slot = *v;
+}
+
 
 void runtime_define_function(Value* fn, const char* name) {
     Value* slot = get_var(name);
@@ -2337,25 +2485,34 @@ static int sig_max_args(EclSig* sig) {
     return maxargs;
 }
 
+
 static EclFunction* choose_overload(EclFunction* fn, Value** args, int argc) {
     EclFunction* best = 0;
-    int best_score = -1;
+    int best_score = 0x7fffffff;
     for (EclFunction* p = fn; p; p = p->next) {
         if (!p->sig) { if (!best) best = p; continue; }
         int minargs = sig_min_args(p->sig, p->defaults);
         int maxargs = sig_max_args(p->sig);
         if (argc < minargs || argc > maxargs) continue;
-        int score = 0, ok = 1;
-        for (int i = 0; i < argc && i < p->sig->count; i++) {
+        int score = 0, used_defaults = 0, ok = 1;
+        for (int i = 0; i < p->sig->count; i++) {
+            if (i == p->sig->varargs_index || i == p->sig->kwargs_index) continue;
+            // 这个参数是否由实参提供
+            int provided;
+            if (p->sig->varargs_index >= 0 && i > p->sig->varargs_index) provided = 1;
+            else provided = (i < argc);
+            if (!provided) used_defaults++;
             const char* t = p->sig->types ? p->sig->types[i] : 0;
-            if (!t || !t[0]) continue;
-            if (value_is_type(args[i], t)) score += 2;
-            else if (my_strcmp(t, "int") == 0 || my_strcmp(t, "float") == 0 ||
-                     my_strcmp(t, "double") == 0 || my_strcmp(t, "i64") == 0) {
-                score += 1;
-            } else ok = 0;
+            if (t && t[0] && provided && i < argc) {
+                if (value_is_type(args[i], t)) score += 2;
+                else if (my_strcmp(t, "int") == 0 || my_strcmp(t, "float") == 0 ||
+                         my_strcmp(t, "double") == 0 || my_strcmp(t, "i64") == 0) score += 1;
+                else ok = 0;
+            }
         }
-        if (ok && score > best_score) { best = p; best_score = score; }
+        if (!ok) continue;
+        score += used_defaults * 10;   // 用默认值重罚，精确匹配优先
+        if (score < best_score) { best = p; best_score = score; }
     }
     return best ? best : fn;
 }
@@ -2425,10 +2582,16 @@ static void dispatch_call(Value* result, Value* f, Value** args, int argc,
     }
     if (f->tag == VAL_FUNCTION) {
         EclFunction* fn = choose_overload((EclFunction*)f->ptr, args, argc);
-        call_bound(result, fn->code, fn->sig, fn->defaults, 0,
-                   args, argc, kwd);
+        int pushed = 0;
+        if (fn->captures) {
+            runtime_cap_push_value(fn->captures);   // 见下方说明
+            pushed = 1;
+        }
+        call_bound(result, fn->code, fn->sig, fn->defaults, 0, args, argc, kwd);
+        if (pushed) runtime_cap_pop();
         return;
     }
+
     result->tag = VAL_NONE; result->i = 0;
 }
 
@@ -3892,7 +4055,9 @@ void runtime_store_clone(Value* slot, Value* src) {
 
 // 兼容旧名字：AOT 的 store 现在统一走深拷贝。
 void runtime_store_share(Value* slot, Value* src) {
-    runtime_store_clone(slot, src);
+    Value* dst = deref_ptr(slot);
+    if (src->tag == VAL_NULL) { dst->tag = VAL_NULL; dst->i = 0; return; }
+    *dst = *src;          // 直接共享，不 clone
 }
 
 void runtime_shutdown(void) {
